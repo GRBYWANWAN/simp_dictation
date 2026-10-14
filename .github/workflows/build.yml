@@ -33,14 +33,15 @@ jobs:
 
       - name: 生成标准 Android 工程
         run: |
-          rm -rf android test
+          rm -rf android
           flutter create . --platforms=android --project-name=simple_dictation
-          # flutter_tts 要求 minSdk 24
-          sed -i 's|minSdk = .*|minSdk = 24|' android/app/build.gradle
-          sed -i 's|minSdk = .*|minSdk = 24|' android/app/build.gradle.kts 2>/dev/null || true
+          # 删除自动生成的测试文件
+          rm -rf test
+          # flutter_tts 要求 minSdk 24（新版 Flutter 用 .kts）
+          sed -i 's|minSdk = .*|minSdk = 24|' android/app/build.gradle.kts
           # 设置应用名称为中文
           sed -i 's/android:label="simple_dictation"/android:label="简易听写"/' android/app/src/main/AndroidManifest.xml
-          grep -n 'minSdk' android/app/build.gradle
+          grep -n 'minSdk' android/app/build.gradle.kts
           grep -n 'android:label' android/app/src/main/AndroidManifest.xml
 
       - name: 代码静态分析
