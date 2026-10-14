@@ -46,10 +46,17 @@ jobs:
           sed -i 's|id "com.android.application" version "[^"]*"|id "com.android.application" version "8.3.0"|' android/settings.gradle
           # 升级 Gradle Wrapper 到 8.4+（AGP 8.3 要求）
           sed -i 's|distributionUrl=.*|distributionUrl=https\\://services.gradle.org/distributions/gradle-8.4-all.zip|' android/gradle/wrapper/gradle-wrapper.properties
-          # flutter_tts 要求 minSdkVersion 24（兼容 groovy 和 kts 两种写法）
-          sed -i 's|minSdkVersion .*|minSdkVersion = 24|' android/app/build.gradle.kts 2>/dev/null || true
+          # flutter_tts 要求 minSdkVersion 24
+          echo "=== 修改前 build.gradle.kts ==="
+          cat android/app/build.gradle.kts 2>/dev/null || echo "(不存在)"
+          echo "=== 修改前 build.gradle ==="
+          cat android/app/build.gradle 2>/dev/null || echo "(不存在)"
+          # 兼容 Kotlin DSL (minSdk = ...) 和 Groovy (minSdkVersion ...) 两种写法
+          sed -i 's|minSdk = .*|minSdk = 24|' android/app/build.gradle.kts 2>/dev/null || true
+          sed -i 's|minSdkVersion .*|minSdkVersion 24|' android/app/build.gradle.kts 2>/dev/null || true
           sed -i 's|minSdkVersion .*|minSdkVersion 24|' android/app/build.gradle 2>/dev/null || true
-          grep -rn 'minSdkVersion' android/app/
+          echo "=== 修改后 ==="
+          grep -rn 'minSdk' android/app/
           # 设置应用名称为中文
           sed -i 's/android:label="sample"/android:label="简易听写"/' android/app/src/main/AndroidManifest.xml
           grep -n 'android:label' android/app/src/main/AndroidManifest.xml
