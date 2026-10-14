@@ -42,9 +42,7 @@ jobs:
           # 删除自动生成的测试文件（引用了不存在的 MyApp 类）
           rm -rf test
           # 升级 Kotlin 和 AGP 版本
-          echo "=== 修改前 settings.gradle ==="
-          cat android/settings.gradle
-          sed -i 's|"kotlin-android" version "[^"]*"|"kotlin-android" version "2.0.20"|' android/settings.gradle
+          sed -i 's|"org.jetbrains.kotlin.android" version "[^"]*"|"org.jetbrains.kotlin.android" version "2.0.20"|' android/settings.gradle
           sed -i 's|"com.android.application" version "[^"]*"|"com.android.application" version "8.3.0"|' android/settings.gradle
           echo "=== 修改后 settings.gradle ==="
           cat android/settings.gradle
