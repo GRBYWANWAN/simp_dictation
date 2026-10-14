@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 import 'package:file_picker/file_picker.dart';
 import 'package:path_provider/path_provider.dart';
@@ -51,7 +52,7 @@ class FileService {
         // 用户取消，回退保存到应用文档目录
         final dir = await getApplicationDocumentsDirectory();
         final timestamp = DateTime.now().millisecondsSinceEpoch;
-        outputPath = '${dir.path}/$fileName\_$timestamp.txt';
+        outputPath = '${dir.path}/${fileName}_$timestamp.txt';
       }
 
       // 确保扩展名

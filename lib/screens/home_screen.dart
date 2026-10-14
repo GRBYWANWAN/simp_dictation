@@ -188,37 +188,6 @@ class _HomeScreenState extends State<HomeScreen> {
     await _loadLists();
   }
 
-  /// 清空错题本
-  Future<void> _clearMistakeBook() async {
-    final confirm = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('确认清空错题本'),
-        content: const Text('确定要清空错题本中的所有词语吗？此操作不可恢复。'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('取消'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            style: TextButton.styleFrom(foregroundColor: Colors.red),
-            child: const Text('清空'),
-          ),
-        ],
-      ),
-    );
-    if (confirm == true) {
-      await widget.storage.clearMistakeBook();
-      await _loadLists();
-      // 如果当前正在查看错题本，清空编辑框
-      if (_selectedListId == WordList.mistakeBookId) {
-        _wordsController.clear();
-      }
-      _showSnack('错题本已清空');
-    }
-  }
-
   /// 导入 TXT
   Future<void> _importTxt() async {
     try {

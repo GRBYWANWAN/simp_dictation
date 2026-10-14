@@ -411,9 +411,9 @@ class _DictationScreenState extends State<DictationScreen> {
           const SizedBox(height: 8),
           // 当前词提示（不显示具体词，避免作弊）
           if (_isSpeaking)
-            Row(
+            const Row(
               mainAxisAlignment: MainAxisAlignment.center,
-              children: const [
+              children: [
                 SizedBox(
                   width: 16,
                   height: 16,
