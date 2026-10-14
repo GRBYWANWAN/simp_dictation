@@ -1,0 +1,570 @@
+import 'dart:async';
+import 'package:flutter/material.dart';
+import '../services/storage_service.dart';
+import '../services/tts_service.dart';
+
+/// 听写状态枚举
+enum DictationStatus { idle, running, paused, finished }
+
+/// 听写模式
+enum DictationMode { auto, manual }
+
+/// 听写页面
+class DictationScreen extends StatefulWidget {
+  final String wordListName;
+  final List<String> words;
+  final StorageService storage;
+
+  const DictationScreen({
+    super.key,
+    required this.wordListName,
+    required this.words,
+    required this.storage,
+  });
+
+  @override
+  State<DictationScreen> createState() => _DictationScreenState();
+}
+
+class _DictationScreenState extends State<DictationScreen> {
+  final TtsService _tts = TtsService();
+  final ScrollController _logScroll = ScrollController();
+  final List<String> _logs = [];
+
+  // 听写配置
+  DictationMode _mode = DictationMode.auto;
+  int _readCount = 1;
+  int _intervalSeconds = 5;
+  bool _shuffle = true;
+
+  // 运行状态
+  DictationStatus _status = DictationStatus.idle;
+  List<String> _shuffledWords = [];
+  int _currentIndex = -1;
+  Timer? _countdownTimer;
+  int _countdown = 0;
+  bool _isSpeaking = false;
+
+  String get _currentWord =>
+      (_currentIndex >= 0 && _currentIndex < _shuffledWords.length)
+          ? _shuffledWords[_currentIndex]
+          : '';
+
+  @override
+  void initState() {
+    super.initState();
+    _initTts();
+    _loadSettings();
+  }
+
+  @override
+  void dispose() {
+    _countdownTimer?.cancel();
+    _tts.dispose();
+    _logScroll.dispose();
+    super.dispose();
+  }
+
+  Future<void> _initTts() async {
+    await _tts.init();
+  }
+
+  /// 加载保存的设置
+  Future<void> _loadSettings() async {
+    final s = await widget.storage.loadSettings();
+    setState(() {
+      _mode = s['mode'] == 'manual' ? DictationMode.manual : DictationMode.auto;
+      _readCount = (s['readCount'] as int?) ?? 1;
+      _intervalSeconds = (s['interval'] as int?) ?? 5;
+      _shuffle = (s['shuffle'] as bool?) ?? true;
+    });
+  }
+
+  /// 保存设置
+  Future<void> _saveSettings() async {
+    await widget.storage.saveSettings({
+      'mode': _mode == DictationMode.auto ? 'auto' : 'manual',
+      'readCount': _readCount,
+      'interval': _intervalSeconds,
+      'shuffle': _shuffle,
+    });
+  }
+
+  /// 添加日志
+  void _log(String msg) {
+    final time = DateTime.now();
+    final stamp =
+        '${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}:${time.second.toString().padLeft(2, '0')}';
+    setState(() {
+      _logs.add('[$stamp] $msg');
+    });
+    // 自动滚动到底部
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_logScroll.hasClients) {
+        _logScroll.animateTo(
+          _logScroll.position.maxScrollExtent,
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeOut,
+        );
+      }
+    });
+  }
+
+  /// 显示 Snackbar
+  void _showSnack(String msg, {bool error = false}) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(msg),
+        backgroundColor: error ? Colors.red.shade700 : null,
+        duration: const Duration(seconds: 2),
+      ),
+    );
+  }
+
+  /// 开始听写
+  void _start() {
+    if (widget.words.isEmpty) {
+      _showSnack('没有词语', error: true);
+      return;
+    }
+    // 准备词语列表
+    _shuffledWords = List.from(widget.words);
+    if (_shuffle) {
+      _shuffledWords.shuffle();
+    }
+    _currentIndex = -1;
+    _status = DictationStatus.running;
+    _logs.clear();
+    _log('开始听写：${widget.wordListName}（共 ${_shuffledWords.length} 个词语）');
+    _log('模式：${_mode == DictationMode.auto ? '自动定时' : '手动'}，'
+        '朗读 $_readCount 遍，间隔 $_intervalSeconds 秒');
+    _saveSettings();
+    _nextWord();
+  }
+
+  /// 播报下一个词语
+  Future<void> _nextWord() async {
+    if (_status != DictationStatus.running) return;
+
+    _currentIndex++;
+    if (_currentIndex >= _shuffledWords.length) {
+      _finish();
+      return;
+    }
+
+    final word = _shuffledWords[_currentIndex];
+    _log('▶ 第 ${_currentIndex + 1}/${_shuffledWords.length} 个词：$word');
+    setState(() => _isSpeaking = true);
+
+    try {
+      await _tts.speak(word, repeat: _readCount);
+    } catch (e) {
+      _log('⚠ 播报出错：$e');
+    }
+
+    if (!mounted) return;
+    setState(() => _isSpeaking = false);
+
+    if (_status != DictationStatus.running) return;
+
+    if (_mode == DictationMode.auto) {
+      // 自动模式：倒计时后自动下一个
+      _startCountdown();
+    } else {
+      // 手动模式：等待用户点击
+      _log('⏸ 等待点击「下一个词」');
+      setState(() {});
+    }
+  }
+
+  /// 开始倒计时
+  void _startCountdown() {
+    _countdown = _intervalSeconds;
+    _countdownTimer?.cancel();
+    _countdownTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (!mounted) {
+        timer.cancel();
+        return;
+      }
+      setState(() {
+        _countdown--;
+      });
+      if (_countdown <= 0) {
+        timer.cancel();
+        _nextWord();
+      }
+    });
+  }
+
+  /// 手动下一个词
+  void _manualNext() {
+    if (_status != DictationStatus.running) return;
+    if (_mode != DictationMode.manual) return;
+    _countdownTimer?.cancel();
+    _nextWord();
+  }
+
+  /// 暂停
+  void _pause() {
+    if (_status != DictationStatus.running) return;
+    _countdownTimer?.cancel();
+    _tts.stop();
+    setState(() {
+      _status = DictationStatus.paused;
+      _isSpeaking = false;
+    });
+    _log('⏸ 已暂停');
+  }
+
+  /// 继续
+  void _resume() {
+    if (_status != DictationStatus.paused) return;
+    setState(() => _status = DictationStatus.running);
+    _log('▶ 继续听写');
+    if (_mode == DictationMode.auto) {
+      // 继续时重新播报当前词
+      _currentIndex--;
+      _nextWord();
+    }
+  }
+
+  /// 停止
+  void _stop() {
+    _countdownTimer?.cancel();
+    _tts.stop();
+    setState(() {
+      _status = DictationStatus.idle;
+      _currentIndex = -1;
+      _isSpeaking = false;
+      _countdown = 0;
+    });
+    _log('⏹ 已停止听写');
+  }
+
+  /// 完成
+  void _finish() {
+    _countdownTimer?.cancel();
+    setState(() {
+      _status = DictationStatus.finished;
+      _isSpeaking = false;
+    });
+    _log('🎉 听写完成！共 ${_shuffledWords.length} 个词语');
+    _showSnack('听写完成！');
+  }
+
+  /// 加入错题本
+  Future<void> _addToMistakeBook() async {
+    if (_currentWord.isEmpty) {
+      _showSnack('当前没有词语', error: true);
+      return;
+    }
+    final added = await widget.storage.addToMistakeBook(_currentWord);
+    if (added) {
+      _log('📌 已加入错题本：$_currentWord');
+      _showSnack('「$_currentWord」已加入错题本');
+    } else {
+      _log('📌 错题本已存在：$_currentWord');
+      _showSnack('「$_currentWord」已在错题本中');
+    }
+  }
+
+  /// 重新播报当前词
+  Future<void> _replayCurrent() async {
+    if (_currentWord.isEmpty) return;
+    _log('🔁 重播：$_currentWord');
+    setState(() => _isSpeaking = true);
+    await _tts.speak(_currentWord, repeat: _readCount);
+    if (mounted) setState(() => _isSpeaking = false);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(widget.wordListName),
+        centerTitle: true,
+      ),
+      body: Column(
+        children: [
+          // 配置区（仅空闲时可改）
+          _buildConfigPanel(),
+          const Divider(height: 1),
+          // 状态显示区
+          _buildStatusPanel(),
+          const Divider(height: 1),
+          // 控制按钮区
+          _buildControlPanel(),
+          const Divider(height: 1),
+          // 日志区
+          Expanded(child: _buildLogPanel()),
+        ],
+      ),
+    );
+  }
+
+  /// 配置面板
+  Widget _buildConfigPanel() {
+    final disabled = _status != DictationStatus.idle;
+    return Padding(
+      padding: const EdgeInsets.all(12),
+      child: Column(
+        children: [
+          Row(
+            children: [
+              const Text('模式：', style: TextStyle(fontWeight: FontWeight.bold)),
+              ChoiceChip(
+                label: const Text('自动定时'),
+                selected: _mode == DictationMode.auto,
+                onSelected: disabled
+                    ? null
+                    : (v) => setState(() => _mode = DictationMode.auto),
+              ),
+              const SizedBox(width: 8),
+              ChoiceChip(
+                label: const Text('手动'),
+                selected: _mode == DictationMode.manual,
+                onSelected: disabled
+                    ? null
+                    : (v) => setState(() => _mode = DictationMode.manual),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              const Text('朗读：', style: TextStyle(fontWeight: FontWeight.bold)),
+              ChoiceChip(
+                label: const Text('1遍'),
+                selected: _readCount == 1,
+                onSelected: disabled ? null : (v) => setState(() => _readCount = 1),
+              ),
+              const SizedBox(width: 8),
+              ChoiceChip(
+                label: const Text('2遍'),
+                selected: _readCount == 2,
+                onSelected: disabled ? null : (v) => setState(() => _readCount = 2),
+              ),
+              const SizedBox(width: 16),
+              if (_mode == DictationMode.auto) ...[
+                const Text('间隔：', style: TextStyle(fontWeight: FontWeight.bold)),
+                SizedBox(
+                  width: 60,
+                  child: TextFormField(
+                    initialValue: '$_intervalSeconds',
+                    keyboardType: TextInputType.number,
+                    enabled: !disabled,
+                    decoration: const InputDecoration(
+                      suffixText: '秒',
+                      isDense: true,
+                      contentPadding: EdgeInsets.symmetric(vertical: 8),
+                    ),
+                    onChanged: (v) {
+                      final n = int.tryParse(v);
+                      if (n != null && n > 0) {
+                        setState(() => _intervalSeconds = n);
+                      }
+                    },
+                  ),
+                ),
+              ],
+            ],
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              const Text('随机打乱：', style: TextStyle(fontWeight: FontWeight.bold)),
+              Switch(
+                value: _shuffle,
+                onChanged: disabled ? null : (v) => setState(() => _shuffle = v),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 状态面板
+  Widget _buildStatusPanel() {
+    return Container(
+      padding: const EdgeInsets.all(20),
+      color: Colors.grey.shade50,
+      child: Column(
+        children: [
+          // 进度
+          LinearProgressIndicator(
+            value: _shuffledWords.isEmpty
+                ? 0
+                : (_currentIndex + 1) / _shuffledWords.length,
+            minHeight: 8,
+            borderRadius: BorderRadius.circular(4),
+          ),
+          const SizedBox(height: 12),
+          Text(
+            _status == DictationStatus.idle
+                ? '点击「开始」进行听写'
+                : _status == DictationStatus.finished
+                    ? '听写完成 🎉'
+                    : '进度：${_currentIndex + 1} / ${_shuffledWords.length}',
+            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w500),
+          ),
+          const SizedBox(height: 8),
+          // 当前词提示（不显示具体词，避免作弊）
+          if (_isSpeaking)
+            const Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+                SizedBox(width: 8),
+                Text('正在播报...', style: TextStyle(color: Colors.blue)),
+              ],
+            )
+          else if (_mode == DictationMode.auto &&
+              _countdown > 0 &&
+              _status == DictationStatus.running)
+            Text(
+              '$_countdown 秒后播报下一个词',
+              style: const TextStyle(color: Colors.orange, fontSize: 15),
+            )
+          else if (_mode == DictationMode.manual &&
+              _status == DictationStatus.running)
+            const Text(
+              '请点击「下一个词」继续',
+              style: TextStyle(color: Colors.orange, fontSize: 15),
+            ),
+        ],
+      ),
+    );
+  }
+
+  /// 控制面板
+  Widget _buildControlPanel() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
+      child: Wrap(
+        alignment: WrapAlignment.center,
+        spacing: 10,
+        runSpacing: 8,
+        children: [
+          if (_status == DictationStatus.idle ||
+              _status == DictationStatus.finished)
+            ElevatedButton.icon(
+              onPressed: _start,
+              icon: const Icon(Icons.play_arrow),
+              label: const Text('开始'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.green,
+                foregroundColor: Colors.white,
+              ),
+            ),
+          if (_status == DictationStatus.running)
+            ElevatedButton.icon(
+              onPressed: _pause,
+              icon: const Icon(Icons.pause),
+              label: const Text('暂停'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.orange,
+                foregroundColor: Colors.white,
+              ),
+            ),
+          if (_status == DictationStatus.paused)
+            ElevatedButton.icon(
+              onPressed: _resume,
+              icon: const Icon(Icons.play_arrow),
+              label: const Text('继续'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.green,
+                foregroundColor: Colors.white,
+              ),
+            ),
+          if (_status == DictationStatus.running ||
+              _status == DictationStatus.paused)
+            OutlinedButton.icon(
+              onPressed: _stop,
+              icon: const Icon(Icons.stop),
+              label: const Text('停止'),
+              style: OutlinedButton.styleFrom(foregroundColor: Colors.red),
+            ),
+          if (_mode == DictationMode.manual &&
+              _status == DictationStatus.running)
+            ElevatedButton.icon(
+              onPressed: _manualNext,
+              icon: const Icon(Icons.skip_next),
+              label: const Text('下一个词'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.blue,
+                foregroundColor: Colors.white,
+              ),
+            ),
+          if (_status == DictationStatus.running ||
+              _status == DictationStatus.paused) ...[
+            OutlinedButton.icon(
+              onPressed: _replayCurrent,
+              icon: const Icon(Icons.replay),
+              label: const Text('重播'),
+            ),
+            OutlinedButton.icon(
+              onPressed: _addToMistakeBook,
+              icon: const Icon(Icons.bookmark_add),
+              label: const Text('加入错题本'),
+              style: OutlinedButton.styleFrom(foregroundColor: Colors.deepOrange),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  /// 日志面板
+  Widget _buildLogPanel() {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      color: Colors.grey.shade900,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            '实时日志',
+            style: TextStyle(
+              color: Colors.white70,
+              fontWeight: FontWeight.bold,
+              fontSize: 13,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Expanded(
+            child: _logs.isEmpty
+                ? const Center(
+                    child: Text(
+                      '暂无日志',
+                      style: TextStyle(color: Colors.white38),
+                    ),
+                  )
+                : ListView.builder(
+                    controller: _logScroll,
+                    itemCount: _logs.length,
+                    itemBuilder: (ctx, i) {
+                      return Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 2),
+                        child: Text(
+                          _logs[i],
+                          style: const TextStyle(
+                            color: Colors.greenAccent,
+                            fontFamily: 'monospace',
+                            fontSize: 12,
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+          ),
+        ],
+      ),
+    );
+  }
+}
