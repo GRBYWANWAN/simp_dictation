@@ -1,78 +1,59 @@
 name: Build Android APK
 
 on:
-  workflow_dispatch:  # 仅手动触发
+  workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
 
     steps:
-      - name: 检出代码
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: 设置 Java JDK 17
+      - name: Setup Java
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
           java-version: '17'
 
-      - name: 安装 Flutter SDK（最新稳定版）
+      - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
           channel: 'stable'
           cache: true
 
-      - name: 打印 Flutter 版本和诊断
-        run: |
-          flutter --version
-          flutter doctor -v
+      - name: Flutter info
+        run: flutter --version
 
-      - name: 安装依赖
+      - name: Install deps
         run: flutter pub get
 
-      - name: 生成标准 Android 工程
+      - name: Generate Android project
         run: |
           rm -rf android
           flutter create . --platforms=android --project-name=simple_dictation
-          # 删除自动生成的测试文件
           rm -rf test
-          # flutter_tts 要求 minSdk 24；file_picker 要求 compileSdk 36（新版 Flutter 用 .kts）
-          sed -i 's|minSdk = .*|minSdk = 24|' android/app/build.gradle.kts
-          sed -i 's|compileSdk = .*|compileSdk = 36|' android/app/build.gradle.kts
-          # 设置应用名称为中文
+
+      - name: Patch Android config
+        run: |
+          sed -i 's/minSdk = .*/minSdk = 24/' android/app/build.gradle.kts
+          sed -i 's/compileSdk = .*/compileSdk = 36/' android/app/build.gradle.kts
           sed -i 's/android:label="simple_dictation"/android:label="简易听写"/' android/app/src/main/AndroidManifest.xml
-          # 抑制插件 compileSdk 元数据检查
           echo "android.suppressUnsupportedCompileSdk=36" >> android/gradle.properties
-          # 强制所有插件模块使用 compileSdk 36
-          cat >> android/build.gradle.kts << 'EOF'
-
-subprojects {
-    afterEvaluate {
-        val androidExt = extensions.findByName("android")
-        if (androidExt is com.android.build.gradle.LibraryExtension) {
-            androidExt.compileSdk = 36
-        }
-    }
-}
-EOF
+          printf '\nsubprojects {\n    afterEvaluate {\n        val a = extensions.findByName("android")\n        if (a is com.android.build.gradle.LibraryExtension) {\n            a.compileSdk = 36\n        }\n    }\n}\n' >> android/build.gradle.kts
+          echo "=== app build.gradle.kts ==="
           grep -n 'minSdk\|compileSdk' android/app/build.gradle.kts
-          grep -n 'android:label' android/app/src/main/AndroidManifest.xml
+          echo "=== project build.gradle.kts ==="
+          cat android/build.gradle.kts
 
-      - name: 代码静态分析
+      - name: Analyze
         run: flutter analyze --no-fatal-infos --no-fatal-warnings || true
 
-      - name: 构建 Release APK
+      - name: Build APK
         run: flutter build apk --release --no-tree-shake-icons
 
-      - name: 重命名 APK（带版本号）
-        run: |
-          APK_PATH=build/app/outputs/flutter-apk/app-release.apk
-          VERSION=$(grep 'version:' pubspec.yaml | head -1 | awk '{print $2}')
-          NEW_NAME="simple_dictation_v${VERSION}_$(date +%Y%m%d).apk"
-          cp "$APK_PATH" "build/app/outputs/flutter-apk/$NEW_NAME"
-
-      - name: 上传 APK 产物
+      - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: simple-dictation-apk
