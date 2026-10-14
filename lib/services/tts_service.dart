@@ -5,58 +5,72 @@ import 'package:flutter_tts/flutter_tts.dart';
 class TtsService {
   final FlutterTts _tts = FlutterTts();
   bool _initialized = false;
-  bool _languageAvailable = true;
+  bool _languageSet = false;
   String? _initError;
 
-  /// 初始化为中文语音
-  /// 返回错误信息，null 表示成功
+  /// 初始化
   Future<String?> init() async {
     if (_initialized) return _initError;
 
     try {
-      // 关键：让 speak 方法在播报完成后才返回
+      // 让 speak 在播报完成后才返回
       await _tts.awaitSpeakCompletion(true);
       await _tts.awaitSynthCompletion(true);
 
       await _tts.setVolume(1.0);
       await _tts.setPitch(1.0);
-      await _tts.setSpeechRate(0.45);
+      await _tts.setSpeechRate(0.5);
 
-      // 设置中文
-      // Android 返回值：0=LANG_AVAILABLE, 1=LANG_COUNTRY_AVAILABLE,
-      //               2=LANG_COUNTRY_VAR_AVAILABLE, -1=缺数据, -2=不支持
-      // iOS 返回：true/false
-      var langResult = await _tts.setLanguage('zh-CN');
-      if (_isLangFailed(langResult)) {
-        langResult = await _tts.setLanguage('zh');
-        if (_isLangFailed(langResult)) {
-          // 部分引擎（如"系统语言"模式）不支持显式设置语言，但系统语言本身是中文，
-          // 仍能正常朗读中文，因此不标记为不可用，只记录警告
-          _initError = '未能显式设置中文语音（引擎可能跟随系统语言）';
+      // 先查询引擎支持的语言列表，确认中文是否可用
+      // 部分引擎（"使用系统语言"模式）不支持显式 setLanguage，强行设置反而静音
+      bool zhFound = false;
+      try {
+        final langs = await _tts.getLanguages;
+        if (langs is List) {
+          for (final l in langs) {
+            final s = l.toString().toLowerCase();
+            if (s.startsWith('zh') || s.contains('chinese')) {
+              zhFound = true;
+              break;
+            }
+          }
         }
+      } catch (_) {
+        // 查询失败则不强制设置
       }
 
+      if (zhFound) {
+        // 列表中有中文，尝试精确设置
+        dynamic r = await _tts.setLanguage('zh-CN');
+        if (r == -1 || r == -2 || r == false) {
+          r = await _tts.setLanguage('zh');
+        }
+        if (r != -1 && r != -2 && r != false) {
+          _languageSet = true;
+        }
+      }
+      // 没找到中文或设置失败：不设置语言，跟随系统（系统为中文时能正常朗读）
+
       _tts.setErrorHandler((msg) {
-        // 运行时错误，不阻断流程
+        // 运行时错误，不阻断
       });
 
       _initialized = true;
-      return null; // 始终允许尝试播报
+      _initError = null;
     } catch (e) {
       _initError = 'TTS 初始化失败：$e';
       _initialized = true;
-      // 即使初始化异常也不阻止尝试播报
-      return null;
     }
+    return _initError;
   }
 
-  /// 判断语言设置是否失败
-  /// 注意：Android 上 0/1/2 都是成功，只有负数才是失败
-  bool _isLangFailed(dynamic result) {
-    if (result == null) return false;
-    if (result is bool) return !result;
-    if (result is int) return result < 0;
-    return false;
+  /// 播放一段测试语音
+  Future<void> playTest() async {
+    await init();
+    await _tts.speak('你好，这是语音测试').timeout(
+      const Duration(seconds: 10),
+      onTimeout: () => null,
+    );
   }
 
   /// 播报词语，可指定朗读次数
@@ -65,7 +79,6 @@ class TtsService {
 
     for (int i = 0; i < repeat; i++) {
       try {
-        // awaitSpeakCompletion(true) 后，speak 会在播报完成时才完成
         await _tts.speak(text).timeout(
           const Duration(seconds: 15),
           onTimeout: () => null,
@@ -73,7 +86,6 @@ class TtsService {
       } catch (_) {
         // 忽略单次错误
       }
-      // 两次朗读之间停顿
       if (i < repeat - 1) {
         await Future.delayed(const Duration(milliseconds: 600));
       }
