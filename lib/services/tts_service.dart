@@ -13,30 +13,20 @@ class TtsService {
     if (_initialized) return;
 
     try {
-      // 等待引擎绑定就绪（Android 引擎服务是异步绑定的，最多等待约 5 秒）
-      for (int attempt = 0; attempt < 5; attempt++) {
-        try {
-          final engines = await _tts.getEngines;
-          if (engines is List && engines.isNotEmpty) break;
-        } catch (_) {}
-        await Future.delayed(const Duration(milliseconds: 1000));
+      // 1. 无条件直接绑定 Google TTS（不依赖 getEngines 列表，
+      //    部分手机 getEngines 返回空，但显式 setEngine 可成功绑定）
+      try {
+        await _tts.setEngine('com.google.android.tts');
+        _engineName = 'com.google.android.tts (显式绑定)';
+        // 切换引擎后系统需重新绑定，给足时间
+        await Future.delayed(const Duration(milliseconds: 1500));
+      } catch (_) {
+        // 绑定失败则回退系统默认
+        _engineName = '(系统默认)';
       }
 
-      // 1. 优先指定 Google TTS 引擎，没有则回退到系统默认
-      try {
-        final engines = await _tts.getEngines;
-        if (engines is List && engines.contains('com.google.android.tts')) {
-          await _tts.setEngine('com.google.android.tts');
-          _engineName = 'com.google.android.tts';
-          // 切换引擎后等待重新绑定
-          await Future.delayed(const Duration(milliseconds: 800));
-        } else if (engines is List && engines.isNotEmpty) {
-          _engineName = engines.first.toString();
-        }
-      } catch (_) {}
-
-      // 2. 从实际语言列表匹配中文（等待语言列表就绪）
-      for (int attempt = 0; attempt < 5; attempt++) {
+      // 2. 等待引擎就绪（轮询语言列表，最多 5 秒）
+      for (int attempt = 0; attempt < 6; attempt++) {
         try {
           final langs = await _tts.getLanguages;
           if (langs is List && langs.isNotEmpty) {
