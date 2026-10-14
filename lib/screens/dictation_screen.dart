@@ -65,14 +65,8 @@ class _DictationScreenState extends State<DictationScreen> {
     super.dispose();
   }
 
-  String? _ttsError;
-
   Future<void> _initTts() async {
-    final err = await _tts.init();
-    if (err != null && mounted) {
-      setState(() => _ttsError = err);
-      _log('⚠ $err');
-    }
+    await _tts.init();
   }
 
   /// 加载保存的设置
@@ -134,52 +128,8 @@ class _DictationScreenState extends State<DictationScreen> {
       return;
     }
 
-    // 开始前检测 TTS
-    final err = await _tts.init();
-    if (err != null && mounted) {
-      setState(() => _ttsError = err);
-      // 弹窗提示但允许继续（可以静默模式使用）
-      final continue_ = await showDialog<bool>(
-        context: context,
-        builder: (ctx) => AlertDialog(
-          title: const Row(
-            children: [
-              Icon(Icons.volume_off, color: Colors.orange),
-              SizedBox(width: 8),
-              Text('语音不可用'),
-            ],
-          ),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(err),
-              const SizedBox(height: 12),
-              const Text(
-                '解决方法：\n'
-                '1. 打开手机「设置」\n'
-                '2. 搜索「文字转语音」或「TTS」\n'
-                '3. 安装/下载中文语音数据\n'
-                '4. 选择 Google 语音合成 或 系统自带引擎\n\n'
-                '也可以继续静默模式（无语音，只显示进度）。',
-                style: TextStyle(fontSize: 13),
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('取消'),
-            ),
-            TextButton(
-              onPressed: () => Navigator.pop(ctx, true),
-              child: const Text('继续静默模式'),
-            ),
-          ],
-        ),
-      );
-      if (continue_ != true) return;
-    }
+    // 初始化 TTS
+    await _tts.init();
 
     // 准备词语列表
     _shuffledWords = List.from(widget.words);
@@ -434,8 +384,37 @@ class _DictationScreenState extends State<DictationScreen> {
               const Spacer(),
               OutlinedButton.icon(
                 onPressed: () async {
-                  await _tts.playTest();
-                  _log('🔊 播放测试语音');
+                  _log('🔊 正在诊断并播放测试语音...');
+                  final diag = await _tts.diagnose();
+                  if (!mounted) return;
+                  showDialog(
+                    context: context,
+                    builder: (ctx) => AlertDialog(
+                      title: const Text('TTS 诊断信息'),
+                      content: SingleChildScrollView(
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: diag.entries
+                              .map((e) => Padding(
+                                    padding:
+                                        const EdgeInsets.symmetric(vertical: 3),
+                                    child: Text(
+                                      '${e.key}：${e.value}',
+                                      style: const TextStyle(fontSize: 12),
+                                    ),
+                                  ))
+                              .toList(),
+                        ),
+                      ),
+                      actions: [
+                        TextButton(
+                          onPressed: () => Navigator.pop(ctx),
+                          child: const Text('知道了'),
+                        ),
+                      ],
+                    ),
+                  );
                 },
                 icon: const Icon(Icons.volume_up, size: 18),
                 label: const Text('测试语音'),
