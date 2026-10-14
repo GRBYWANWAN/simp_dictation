@@ -13,16 +13,25 @@ class TtsService {
     if (_initialized) return;
 
     try {
-      // 1. 无条件直接绑定 Google TTS（不依赖 getEngines 列表，
+      // 1. 按优先级直接绑定引擎（不依赖 getEngines 列表，
       //    部分手机 getEngines 返回空，但显式 setEngine 可成功绑定）
-      try {
-        await _tts.setEngine('com.google.android.tts');
-        _engineName = 'com.google.android.tts (显式绑定)';
-        // 切换引擎后系统需重新绑定，给足时间
-        await Future.delayed(const Duration(milliseconds: 1500));
-      } catch (_) {
-        // 绑定失败则回退系统默认
-        _engineName = '(系统默认)';
+      const enginePriorities = [
+        'com.oplus.ttsaccessibilityengine', // 系统无障碍引擎（中文温柔女声）
+        'com.yuemeng.speechsuite', // 语音套件
+        'com.google.android.tts', // Google 兜底
+      ];
+      for (final engine in enginePriorities) {
+        try {
+          await _tts.setEngine(engine);
+          _engineName = '$engine (显式绑定)';
+          // 切换引擎后系统需重新绑定，给足时间
+          await Future.delayed(const Duration(milliseconds: 1500));
+          // 绑定后验证语言列表是否就绪
+          final langs = await _tts.getLanguages;
+          if (langs is List && langs.isNotEmpty) break;
+        } catch (_) {
+          // 该引擎不可用，继续尝试下一个
+        }
       }
 
       // 2. 等待引擎就绪（轮询语言列表，最多 5 秒）
