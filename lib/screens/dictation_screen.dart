@@ -65,8 +65,14 @@ class _DictationScreenState extends State<DictationScreen> {
     super.dispose();
   }
 
+  String? _ttsError;
+
   Future<void> _initTts() async {
-    await _tts.init();
+    final err = await _tts.init();
+    if (err != null && mounted) {
+      setState(() => _ttsError = err);
+      _log('⚠ $err');
+    }
   }
 
   /// 加载保存的设置
@@ -122,11 +128,59 @@ class _DictationScreenState extends State<DictationScreen> {
   }
 
   /// 开始听写
-  void _start() {
+  void _start() async {
     if (widget.words.isEmpty) {
       _showSnack('没有词语', error: true);
       return;
     }
+
+    // 开始前检测 TTS
+    final err = await _tts.init();
+    if (err != null && mounted) {
+      setState(() => _ttsError = err);
+      // 弹窗提示但允许继续（可以静默模式使用）
+      final continue_ = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Row(
+            children: [
+              Icon(Icons.volume_off, color: Colors.orange),
+              SizedBox(width: 8),
+              Text('语音不可用'),
+            ],
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(err),
+              const SizedBox(height: 12),
+              const Text(
+                '解决方法：\n'
+                '1. 打开手机「设置」\n'
+                '2. 搜索「文字转语音」或「TTS」\n'
+                '3. 安装/下载中文语音数据\n'
+                '4. 选择 Google 语音合成 或 系统自带引擎\n\n'
+                '也可以继续静默模式（无语音，只显示进度）。',
+                style: TextStyle(fontSize: 13),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('取消'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('继续静默模式'),
+            ),
+          ],
+        ),
+      );
+      if (continue_ != true) return;
+    }
+
     // 准备词语列表
     _shuffledWords = List.from(widget.words);
     if (_shuffle) {
@@ -376,6 +430,15 @@ class _DictationScreenState extends State<DictationScreen> {
               Switch(
                 value: _shuffle,
                 onChanged: disabled ? null : (v) => setState(() => _shuffle = v),
+              ),
+              const Spacer(),
+              OutlinedButton.icon(
+                onPressed: () async {
+                  await _tts.playTest();
+                  _log('🔊 播放测试语音');
+                },
+                icon: const Icon(Icons.volume_up, size: 18),
+                label: const Text('测试语音'),
               ),
             ],
           ),
