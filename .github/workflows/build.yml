@@ -42,6 +42,8 @@ jobs:
           sed -i 's|compileSdk = .*|compileSdk = 36|' android/app/build.gradle.kts
           # 设置应用名称为中文
           sed -i 's/android:label="simple_dictation"/android:label="简易听写"/' android/app/src/main/AndroidManifest.xml
+          # 抑制插件 compileSdk 元数据检查
+          echo "android.suppressUnsupportedCompileSdk=36" >> android/gradle.properties
           grep -n 'minSdk\|compileSdk' android/app/build.gradle.kts
           grep -n 'android:label' android/app/src/main/AndroidManifest.xml
 
