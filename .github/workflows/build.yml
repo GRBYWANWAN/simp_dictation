@@ -37,11 +37,12 @@ jobs:
           flutter create . --platforms=android --project-name=simple_dictation
           # 删除自动生成的测试文件
           rm -rf test
-          # flutter_tts 要求 minSdk 24（新版 Flutter 用 .kts）
+          # flutter_tts 要求 minSdk 24；file_picker 要求 compileSdk 36（新版 Flutter 用 .kts）
           sed -i 's|minSdk = .*|minSdk = 24|' android/app/build.gradle.kts
+          sed -i 's|compileSdk = .*|compileSdk = 36|' android/app/build.gradle.kts
           # 设置应用名称为中文
           sed -i 's/android:label="simple_dictation"/android:label="简易听写"/' android/app/src/main/AndroidManifest.xml
-          grep -n 'minSdk' android/app/build.gradle.kts
+          grep -n 'minSdk\|compileSdk' android/app/build.gradle.kts
           grep -n 'android:label' android/app/src/main/AndroidManifest.xml
 
       - name: 代码静态分析
