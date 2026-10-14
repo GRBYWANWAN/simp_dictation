@@ -41,7 +41,10 @@ jobs:
           sed -i 's/compileSdk = .*/compileSdk = 36/' android/app/build.gradle.kts
           sed -i 's/android:label="simple_dictation"/android:label="简易听写"/' android/app/src/main/AndroidManifest.xml
           echo "android.suppressUnsupportedCompileSdk=36" >> android/gradle.properties
-          printf '\nsubprojects {\n    afterEvaluate {\n        val a = extensions.findByName("android")\n        if (a is com.android.build.gradle.LibraryExtension) {\n            a.compileSdk = 36\n        }\n    }\n}\n' >> android/build.gradle.kts
+          # 强制所有插件模块用 compileSdk 36（必须放在 build.gradle.kts 开头）
+          printf 'subprojects {\n    afterEvaluate {\n        val a = extensions.findByName("android")\n        if (a is com.android.build.gradle.LibraryExtension) {\n            a.compileSdk = 36\n        }\n    }\n}\n' > android/build.gradle.kts.tmp
+          cat android/build.gradle.kts >> android/build.gradle.kts.tmp
+          mv android/build.gradle.kts.tmp android/build.gradle.kts
           echo "=== app build.gradle.kts ==="
           grep -n 'minSdk\|compileSdk' android/app/build.gradle.kts
           echo "=== project build.gradle.kts ==="
