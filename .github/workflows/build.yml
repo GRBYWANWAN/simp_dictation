@@ -17,11 +17,10 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
-      - name: 安装 Flutter SDK
+      - name: 安装 Flutter SDK（最新稳定版）
         uses: subosito/flutter-action@v2
         with:
           channel: 'stable'
-          flutter-version: '3.24.0'
           cache: true
 
       - name: 打印 Flutter 版本和诊断
@@ -29,34 +28,19 @@ jobs:
           flutter --version
           flutter doctor -v
 
-      - name: 接受 Android SDK 许可
-        run: yes | flutter doctor --android-licenses || true
-
       - name: 安装依赖
         run: flutter pub get
 
       - name: 生成标准 Android 工程
         run: |
-          rm -rf android
+          rm -rf android test
           flutter create . --platforms=android --project-name=simple_dictation
-          # 删除自动生成的测试文件（引用了不存在的 MyApp 类）
-          rm -rf test
-          # 升级 Kotlin 和 AGP 版本
-          sed -i 's|"org.jetbrains.kotlin.android" version "[^"]*"|"org.jetbrains.kotlin.android" version "2.0.20"|' android/settings.gradle
-          sed -i 's|"com.android.application" version "[^"]*"|"com.android.application" version "8.3.0"|' android/settings.gradle
-          echo "=== 修改后 settings.gradle ==="
-          cat android/settings.gradle
-          # 升级 Gradle Wrapper 到 8.5（AGP 8.3 + Kotlin 2.0 要求）
-          sed -i 's|distributionUrl=.*|distributionUrl=https://services.gradle.org/distributions/gradle-8.5-all.zip|' android/gradle/wrapper/gradle-wrapper.properties
-          echo "=== gradle-wrapper.properties ==="
-          cat android/gradle/wrapper/gradle-wrapper.properties
-          # flutter_tts 要求 minSdk 24（新模板写法是 minSdk = flutter.minSdkVersion）
+          # flutter_tts 要求 minSdk 24
           sed -i 's|minSdk = .*|minSdk = 24|' android/app/build.gradle
           sed -i 's|minSdk = .*|minSdk = 24|' android/app/build.gradle.kts 2>/dev/null || true
-          echo "=== 修改后 ==="
-          grep -rn 'minSdk' android/app/build.gradle
           # 设置应用名称为中文
-          sed -i 's/android:label="sample"/android:label="简易听写"/' android/app/src/main/AndroidManifest.xml
+          sed -i 's/android:label="simple_dictation"/android:label="简易听写"/' android/app/src/main/AndroidManifest.xml
+          grep -n 'minSdk' android/app/build.gradle
           grep -n 'android:label' android/app/src/main/AndroidManifest.xml
 
       - name: 代码静态分析
@@ -71,7 +55,6 @@ jobs:
           VERSION=$(grep 'version:' pubspec.yaml | head -1 | awk '{print $2}')
           NEW_NAME="simple_dictation_v${VERSION}_$(date +%Y%m%d).apk"
           cp "$APK_PATH" "build/app/outputs/flutter-apk/$NEW_NAME"
-          echo "APK_NAME=$NEW_NAME" >> $GITHUB_ENV
 
       - name: 上传 APK 产物
         uses: actions/upload-artifact@v4
