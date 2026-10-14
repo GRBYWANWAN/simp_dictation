@@ -42,8 +42,10 @@ jobs:
           # 删除自动生成的测试文件（引用了不存在的 MyApp 类）
           rm -rf test
           # 升级 Kotlin 和 AGP 版本（flutter_tts 需要新版 Kotlin）
-          sed -i 's|id "org.jetbrains.kotlin.android" version "[^"]*"|id "org.jetbrains.kotlin.android" version "2.0.20"|' android/settings.gradle
+          # 注意：新模板里插件 id 是 "kotlin-android" 不是 "org.jetbrains.kotlin.android"
+          sed -i 's|id "kotlin-android" version "[^"]*"|id "kotlin-android" version "2.0.20"|' android/settings.gradle
           sed -i 's|id "com.android.application" version "[^"]*"|id "com.android.application" version "8.3.0"|' android/settings.gradle
+          grep -n 'kotlin\|com.android.application' android/settings.gradle
           # 升级 Gradle Wrapper 到 8.4+（AGP 8.3 要求）
           sed -i 's|distributionUrl=.*|distributionUrl=https\\://services.gradle.org/distributions/gradle-8.4-all.zip|' android/gradle/wrapper/gradle-wrapper.properties
           # flutter_tts 要求 minSdk 24（新模板写法是 minSdk = flutter.minSdkVersion）
