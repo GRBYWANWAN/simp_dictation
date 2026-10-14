@@ -44,6 +44,18 @@ jobs:
           sed -i 's/android:label="simple_dictation"/android:label="简易听写"/' android/app/src/main/AndroidManifest.xml
           # 抑制插件 compileSdk 元数据检查
           echo "android.suppressUnsupportedCompileSdk=36" >> android/gradle.properties
+          # 强制所有插件模块使用 compileSdk 36
+          cat >> android/build.gradle.kts << 'EOF'
+
+subprojects {
+    afterEvaluate {
+        val androidExt = extensions.findByName("android")
+        if (androidExt is com.android.build.gradle.LibraryExtension) {
+            androidExt.compileSdk = 36
+        }
+    }
+}
+EOF
           grep -n 'minSdk\|compileSdk' android/app/build.gradle.kts
           grep -n 'android:label' android/app/src/main/AndroidManifest.xml
 
