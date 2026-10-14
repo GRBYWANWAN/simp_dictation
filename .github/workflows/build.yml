@@ -34,6 +34,8 @@ jobs:
         run: |
           rm -rf android
           flutter create . --platforms=android --project-name=simple_dictation
+          # 删除自动生成的测试文件（引用了不存在的 MyApp 类）
+          rm -rf test
           # 设置应用名称为中文
           sed -i 's/android:label="sample"/android:label="简易听写"/' android/app/src/main/AndroidManifest.xml
           grep -n 'android:label' android/app/src/main/AndroidManifest.xml
