@@ -46,8 +46,10 @@ jobs:
           sed -i 's|"com.android.application" version "[^"]*"|"com.android.application" version "8.3.0"|' android/settings.gradle
           echo "=== 修改后 settings.gradle ==="
           cat android/settings.gradle
-          # 升级 Gradle Wrapper 到 8.4+（AGP 8.3 要求）
-          sed -i 's|distributionUrl=.*|distributionUrl=https\\://services.gradle.org/distributions/gradle-8.4-all.zip|' android/gradle/wrapper/gradle-wrapper.properties
+          # 升级 Gradle Wrapper 到 8.5（AGP 8.3 + Kotlin 2.0 要求）
+          sed -i 's|distributionUrl=.*|distributionUrl=https://services.gradle.org/distributions/gradle-8.5-all.zip|' android/gradle/wrapper/gradle-wrapper.properties
+          echo "=== gradle-wrapper.properties ==="
+          cat android/gradle/wrapper/gradle-wrapper.properties
           # flutter_tts 要求 minSdk 24（新模板写法是 minSdk = flutter.minSdkVersion）
           sed -i 's|minSdk = .*|minSdk = 24|' android/app/build.gradle
           sed -i 's|minSdk = .*|minSdk = 24|' android/app/build.gradle.kts 2>/dev/null || true
