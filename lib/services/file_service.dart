@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 import 'package:file_picker/file_picker.dart';
 import 'package:path_provider/path_provider.dart';
 
@@ -101,10 +102,10 @@ class FileService {
   }
 
   /// 编码字符串为 UTF-8 字节（带 BOM，兼容 Windows 记事本）
-  List<int> _encodeString(String text) {
+  Uint8List _encodeString(String text) {
     // 添加 UTF-8 BOM，确保 Windows 记事本正确识别中文
     final bom = [0xEF, 0xBB, 0xBF];
-    return [...bom, ...utf8.encode(text)];
+    return Uint8List.fromList([...bom, ...utf8.encode(text)]);
   }
 
   /// 解析文本为词语列表
