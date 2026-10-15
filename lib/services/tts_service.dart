@@ -1,9 +1,12 @@
 import 'dart:async';
+import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 
 /// TTS 语音播报服务
 class TtsService {
   final FlutterTts _tts = FlutterTts();
+  // 提示音专用播放器（播放打包好的真实"嘀"音，保证一定发声）
+  final AudioPlayer _beepPlayer = AudioPlayer();
   bool _initialized = false;
   String? _engineName;
   String? _languageCode;
@@ -28,22 +31,16 @@ class TtsService {
     _beepEnabled = enabled;
   }
 
-  /// 播放提示音（短促"嘀"声），由听写页在每个词前调用
+  /// 播放提示音（真实的"嘀"音频，由听写页在每个词前调用）
+  /// 不依赖 TTS 引擎，确保一定能发声
   Future<void> playBeep() async {
-    await init();
     try {
-      // 提示音不受语速影响，用正常语速读一个短促的"嘀"
-      await _tts.setSpeechRate(1.0);
-      await _tts.speak('嘀').timeout(
-        const Duration(seconds: 2),
-        onTimeout: () => _tts.stop(),
-      );
-      await _tts.setSpeechRate(_rate);
-    } catch (_) {
-      try {
-        await _tts.setSpeechRate(_rate);
-      } catch (_) {}
-    }
+      // 从头播放打包好的提示音
+      await _beepPlayer.stop();
+      await _beepPlayer.play(AssetSource('sounds/beep.wav'));
+    } catch (_) {}
+    // 等待提示音播完（音频约 0.25 秒）
+    await Future.delayed(const Duration(milliseconds: 400));
   }
 
   /// 初始化 TTS 引擎
@@ -210,6 +207,9 @@ class TtsService {
     try {
       await _tts.stop();
     } catch (_) {}
+    try {
+      await _beepPlayer.stop();
+    } catch (_) {}
   }
 
   Future<void> pause() async {
@@ -227,6 +227,9 @@ class TtsService {
   Future<void> dispose() async {
     try {
       await _tts.stop();
+    } catch (_) {}
+    try {
+      await _beepPlayer.dispose();
     } catch (_) {}
   }
 }
