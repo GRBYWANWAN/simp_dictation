@@ -14,6 +14,7 @@ dependencies:
   file_picker: ^8.0.0+1
   path_provider: ^2.1.2
   cupertino_icons: ^1.0.6
+  audioplayers: ^6.1.0
 
 dev_dependencies:
   flutter_test:
@@ -22,3 +23,5 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+  assets:
+    - assets/sounds/beep.wav
