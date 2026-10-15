@@ -317,25 +317,31 @@ class _DictationScreenState extends State<DictationScreen> {
         centerTitle: true,
       ),
       body: SafeArea(
-        child: SingleChildScrollView(
-          child: Column(
-            children: [
-              // 配置区（仅空闲时可改）
-              _buildConfigPanel(),
-              const Divider(height: 1),
-              // 状态显示区
-              _buildStatusPanel(),
-              const Divider(height: 1),
-              // 控制按钮区
-              _buildControlPanel(),
-              const Divider(height: 1),
-              // 日志区（固定高度，较原来减半，给上方调整留出空间）
-              SizedBox(
-                height: 150,
-                child: _buildLogPanel(),
+        child: Column(
+          children: [
+            // 上方内容：超高时可滚动，避免被裁切
+            Expanded(
+              child: SingleChildScrollView(
+                child: Column(
+                  children: [
+                    // 配置区（仅空闲时可改）
+                    _buildConfigPanel(),
+                    const Divider(height: 1),
+                    // 状态显示区
+                    _buildStatusPanel(),
+                    const Divider(height: 1),
+                    // 控制按钮区
+                    _buildControlPanel(),
+                  ],
+                ),
               ),
-            ],
-          ),
+            ),
+            // 日志区：固定高度，始终贴底
+            SizedBox(
+              height: 150,
+              child: _buildLogPanel(),
+            ),
+          ],
         ),
       ),
     );
@@ -425,14 +431,20 @@ class _DictationScreenState extends State<DictationScreen> {
                   ),
                   const SizedBox(width: 8),
                 ],
-                if (_mode == DictationMode.auto)
-                  Text(
-                    '每词总间隔 $_totalInterval 秒'
-                    '（$_intervalSeconds + $_repeatIntervalSeconds）',
-                    style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
-                  ),
               ],
             ),
+            if (_mode == DictationMode.auto)
+              Align(
+                alignment: Alignment.centerLeft,
+                child: Padding(
+                  padding: const EdgeInsets.only(top: 2, left: 4),
+                  child: Text(
+                    '每词总间隔 $_totalInterval 秒'
+                    '（基础 $_intervalSeconds + 两遍 $_repeatIntervalSeconds）',
+                    style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+                  ),
+                ),
+              ),
           ],
           const SizedBox(height: 8),
           Row(
@@ -488,45 +500,45 @@ class _DictationScreenState extends State<DictationScreen> {
                 value: _shuffle,
                 onChanged: disabled ? null : (v) => setState(() => _shuffle = v),
               ),
-              const SizedBox(width: 8),
-              OutlinedButton.icon(
-                onPressed: () async {
-                  _log('🔊 正在诊断并播放测试语音...');
-                  final diag = await _tts.diagnose();
-                  if (!mounted) return;
-                  showDialog(
-                    context: context,
-                    builder: (ctx) => AlertDialog(
-                      title: const Text('TTS 诊断信息'),
-                      content: SingleChildScrollView(
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: diag.entries
-                              .map((e) => Padding(
-                                    padding:
-                                        const EdgeInsets.symmetric(vertical: 3),
-                                    child: Text(
-                                      '${e.key}：${e.value}',
-                                      style: const TextStyle(fontSize: 12),
-                                    ),
-                                  ))
-                              .toList(),
-                        ),
-                      ),
-                      actions: [
-                        TextButton(
-                          onPressed: () => Navigator.pop(ctx),
-                          child: const Text('知道了'),
-                        ),
-                      ],
-                    ),
-                  );
-                },
-                icon: const Icon(Icons.volume_up, size: 18),
-                label: const Text('测试语音'),
-              ),
             ],
+          ),
+          // 测试语音按钮独占一行，避免被右边缘裁切
+          OutlinedButton.icon(
+            onPressed: () async {
+              _log('🔊 正在诊断并播放测试语音...');
+              final diag = await _tts.diagnose();
+              if (!mounted) return;
+              showDialog(
+                context: context,
+                builder: (ctx) => AlertDialog(
+                  title: const Text('TTS 诊断信息'),
+                  content: SingleChildScrollView(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: diag.entries
+                          .map((e) => Padding(
+                                padding:
+                                    const EdgeInsets.symmetric(vertical: 3),
+                                child: Text(
+                                  '${e.key}：${e.value}',
+                                  style: const TextStyle(fontSize: 12),
+                                ),
+                              ))
+                          .toList(),
+                    ),
+                  ),
+                  actions: [
+                    TextButton(
+                      onPressed: () => Navigator.pop(ctx),
+                      child: const Text('知道了'),
+                    ),
+                  ],
+                ),
+              );
+            },
+            icon: const Icon(Icons.volume_up, size: 18),
+            label: const Text('测试语音'),
           ),
         ],
       ),
