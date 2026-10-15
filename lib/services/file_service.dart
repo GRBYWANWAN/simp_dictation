@@ -40,30 +40,42 @@ class FileService {
       final content = words.join('\n');
       final bytes = _encodeString(content);
 
-      // 使用 file_picker 选择保存位置（Android/Windows/macOS 通用）
-      String? outputPath = await FilePicker.platform.saveFile(
-        dialogTitle: '导出词单为 TXT',
-        fileName: '$fileName.txt',
-        type: FileType.custom,
-        allowedExtensions: ['txt'],
-      );
+      if (Platform.isAndroid || Platform.isIOS) {
+        // 移动端：file_picker 必须直接传 bytes，由系统 SAF 写入
+        final outputPath = await FilePicker.platform.saveFile(
+          dialogTitle: '导出词单为 TXT',
+          fileName: '$fileName.txt',
+          type: FileType.custom,
+          allowedExtensions: ['txt'],
+          bytes: bytes,
+        );
+        // outputPath 为 null 表示用户取消（移动端文件已由系统写入）
+        return outputPath;
+      } else {
+        // 桌面端（Windows/macOS/Linux）：选择保存路径后自己写文件
+        String? outputPath = await FilePicker.platform.saveFile(
+          dialogTitle: '导出词单为 TXT',
+          fileName: '$fileName.txt',
+          type: FileType.custom,
+          allowedExtensions: ['txt'],
+        );
 
-      if (outputPath == null) {
-        // 用户取消，回退保存到应用文档目录
-        final dir = await getApplicationDocumentsDirectory();
-        final timestamp = DateTime.now().millisecondsSinceEpoch;
-        outputPath = '${dir.path}/${fileName}_$timestamp.txt';
+        if (outputPath == null) {
+          // 用户取消，回退保存到应用文档目录
+          final dir = await getApplicationDocumentsDirectory();
+          final timestamp = DateTime.now().millisecondsSinceEpoch;
+          outputPath = '${dir.path}/${fileName}_$timestamp.txt';
+        }
+
+        // 确保扩展名
+        if (!outputPath.toLowerCase().endsWith('.txt')) {
+          outputPath = '$outputPath.txt';
+        }
+
+        final file = File(outputPath);
+        await file.writeAsBytes(bytes);
+        return outputPath;
       }
-
-      // 确保扩展名
-      if (!outputPath.toLowerCase().endsWith('.txt')) {
-        outputPath = '$outputPath.txt';
-      }
-
-      // 写入文件
-      final file = File(outputPath);
-      await file.writeAsBytes(bytes);
-      return outputPath;
     } catch (e) {
       throw Exception('导出 TXT 失败: $e');
     }

@@ -109,7 +109,8 @@ class StorageService {
       return {
         'mode': 'auto', // auto / manual
         'readCount': 1, // 1 / 2
-        'interval': 5, // 秒
+        'interval': 5, // 词间基础间隔（秒）
+        'repeatInterval': 1, // 朗读2遍时，两遍间隔（秒）
         'shuffle': true,
         'speed': 1.0, // 语速：0.75 / 1.0 / 1.25
         'beep': true, // 每词前提示音
@@ -122,6 +123,7 @@ class StorageService {
         'mode': 'auto',
         'readCount': 1,
         'interval': 5,
+        'repeatInterval': 1,
         'shuffle': true,
         'speed': 1.0,
         'beep': true,

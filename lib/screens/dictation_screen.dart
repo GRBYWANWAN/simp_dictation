@@ -34,10 +34,16 @@ class _DictationScreenState extends State<DictationScreen> {
   // 听写配置
   DictationMode _mode = DictationMode.auto;
   int _readCount = 1;
-  int _intervalSeconds = 5;
+  int _intervalSeconds = 5; // 词与词之间的基础间隔（秒）
+  int _repeatIntervalSeconds = 1; // 朗读2遍时，两遍之间的间隔（秒）
   bool _shuffle = true;
   double _speed = 1.0; // 语速：0.75 / 1.0 / 1.25
   bool _beepEnabled = true; // 每个词前播放提示音
+
+  /// 自动模式下每个词播报完后的总等待秒数
+  /// 读2遍时 = 基础间隔 + 两遍间隔
+  int get _totalInterval =>
+      _intervalSeconds + (_readCount == 2 ? _repeatIntervalSeconds : 0);
 
   // 运行状态
   DictationStatus _status = DictationStatus.idle;
@@ -78,6 +84,7 @@ class _DictationScreenState extends State<DictationScreen> {
       _mode = s['mode'] == 'manual' ? DictationMode.manual : DictationMode.auto;
       _readCount = (s['readCount'] as int?) ?? 1;
       _intervalSeconds = (s['interval'] as int?) ?? 5;
+      _repeatIntervalSeconds = (s['repeatInterval'] as int?) ?? 1;
       _shuffle = (s['shuffle'] as bool?) ?? true;
       _speed = (s['speed'] as num?)?.toDouble() ?? 1.0;
       _beepEnabled = (s['beep'] as bool?) ?? true;
@@ -92,6 +99,7 @@ class _DictationScreenState extends State<DictationScreen> {
       'mode': _mode == DictationMode.auto ? 'auto' : 'manual',
       'readCount': _readCount,
       'interval': _intervalSeconds,
+      'repeatInterval': _repeatIntervalSeconds,
       'shuffle': _shuffle,
       'speed': _speed,
       'beep': _beepEnabled,
@@ -149,7 +157,8 @@ class _DictationScreenState extends State<DictationScreen> {
     _logs.clear();
     _log('开始听写：${widget.wordListName}（共 ${_shuffledWords.length} 个词语）');
     _log('模式：${_mode == DictationMode.auto ? '自动定时' : '手动'}，'
-        '朗读 $_readCount 遍，间隔 $_intervalSeconds 秒');
+        '朗读 $_readCount 遍，词间间隔 $_intervalSeconds 秒'
+        '${_readCount == 2 ? '，两遍间隔 $_repeatIntervalSeconds 秒' : ''}');
     _saveSettings();
     _nextWord();
   }
@@ -169,14 +178,18 @@ class _DictationScreenState extends State<DictationScreen> {
     setState(() => _isSpeaking = true);
 
     try {
-      // 每个词语前先播放"嘀"提示音，间隔 1 秒后再播报词语
+      // 每个词语前先播放"叮咚"提示音，间隔 1 秒后再播报词语
       if (_beepEnabled) {
         await _tts.playBeep();
         if (_status != DictationStatus.running) return;
         await Future.delayed(const Duration(seconds: 1));
         if (_status != DictationStatus.running) return;
       }
-      await _tts.speak(word, repeat: _readCount);
+      await _tts.speak(
+        word,
+        repeat: _readCount,
+        repeatIntervalSeconds: _repeatIntervalSeconds,
+      );
     } catch (e) {
       _log('⚠ 播报出错：$e');
     }
@@ -198,7 +211,7 @@ class _DictationScreenState extends State<DictationScreen> {
 
   /// 开始倒计时
   void _startCountdown() {
-    _countdown = _intervalSeconds;
+    _countdown = _totalInterval;
     _countdownTimer?.cancel();
     _countdownTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
       if (!mounted) {
@@ -303,20 +316,27 @@ class _DictationScreenState extends State<DictationScreen> {
         title: Text(widget.wordListName),
         centerTitle: true,
       ),
-      body: Column(
-        children: [
-          // 配置区（仅空闲时可改）
-          _buildConfigPanel(),
-          const Divider(height: 1),
-          // 状态显示区
-          _buildStatusPanel(),
-          const Divider(height: 1),
-          // 控制按钮区
-          _buildControlPanel(),
-          const Divider(height: 1),
-          // 日志区
-          Expanded(child: _buildLogPanel()),
-        ],
+      body: SafeArea(
+        child: SingleChildScrollView(
+          child: Column(
+            children: [
+              // 配置区（仅空闲时可改）
+              _buildConfigPanel(),
+              const Divider(height: 1),
+              // 状态显示区
+              _buildStatusPanel(),
+              const Divider(height: 1),
+              // 控制按钮区
+              _buildControlPanel(),
+              const Divider(height: 1),
+              // 日志区（固定高度，较原来减半，给上方调整留出空间）
+              SizedBox(
+                height: 150,
+                child: _buildLogPanel(),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -388,6 +408,32 @@ class _DictationScreenState extends State<DictationScreen> {
               ],
             ],
           ),
+          // 朗读2遍时：两遍之间的间隔可调
+          if (_readCount == 2) ...[
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                const Text('两遍间隔：',
+                    style: TextStyle(fontWeight: FontWeight.bold)),
+                for (final sec in [1, 2, 3]) ...[
+                  ChoiceChip(
+                    label: Text('$sec 秒'),
+                    selected: _repeatIntervalSeconds == sec,
+                    onSelected: disabled
+                        ? null
+                        : (v) => setState(() => _repeatIntervalSeconds = sec),
+                  ),
+                  const SizedBox(width: 8),
+                ],
+                if (_mode == DictationMode.auto)
+                  Text(
+                    '每词总间隔 $_totalInterval 秒'
+                    '（$_intervalSeconds + $_repeatIntervalSeconds）',
+                    style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+                  ),
+              ],
+            ),
+          ],
           const SizedBox(height: 8),
           Row(
             children: [
@@ -436,7 +482,6 @@ class _DictationScreenState extends State<DictationScreen> {
                     ? null
                     : (v) => setState(() => _beepEnabled = v),
               ),
-              const Text('每词前"嘀"一声', style: TextStyle(fontSize: 13)),
               const Spacer(),
               const Text('随机打乱：', style: TextStyle(fontWeight: FontWeight.bold)),
               Switch(

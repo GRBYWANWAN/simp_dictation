@@ -31,16 +31,16 @@ class TtsService {
     _beepEnabled = enabled;
   }
 
-  /// 播放提示音（真实的"嘀"音频，由听写页在每个词前调用）
+  /// 播放提示音（Windows Ding.wav "叮咚"提示音，由听写页在每个词前调用）
   /// 不依赖 TTS 引擎，确保一定能发声
   Future<void> playBeep() async {
     try {
       // 从头播放打包好的提示音
       await _beepPlayer.stop();
-      await _beepPlayer.play(AssetSource('sounds/beep.wav'));
+      await _beepPlayer.play(AssetSource('sounds/ding.wav'));
     } catch (_) {}
-    // 等待提示音播完（音频约 0.25 秒）
-    await Future.delayed(const Duration(milliseconds: 400));
+    // 等待提示音播完（音频约 0.4 秒）
+    await Future.delayed(const Duration(milliseconds: 600));
   }
 
   /// 初始化 TTS 引擎
@@ -179,7 +179,13 @@ class TtsService {
   }
 
   /// 朗读文字
-  Future<void> speak(String text, {int repeat = 1, int timeout = 8}) async {
+  /// [repeat] 朗读遍数
+  /// [repeatIntervalSeconds] 朗读两遍时，第一遍与第二遍之间的间隔（秒）
+  Future<void> speak(String text, {
+    int repeat = 1,
+    int timeout = 8,
+    int repeatIntervalSeconds = 1,
+  }) async {
     if (text.isEmpty) return;
     await init();
     // 每次播报前确保使用当前语速
@@ -198,7 +204,7 @@ class TtsService {
         );
       } catch (_) {}
       if (i < repeat - 1) {
-        await Future.delayed(const Duration(milliseconds: 600));
+        await Future.delayed(Duration(seconds: repeatIntervalSeconds));
       }
     }
   }
