@@ -34,10 +34,6 @@ class _HomeScreenState extends State<HomeScreen> {
   List<String> _cachedWords = [];
   Timer? _parseDebounce;
 
-  // 保存反馈条（显示在词语列表框上方）
-  String? _inlineTip;
-  Timer? _tipTimer;
-
   @override
   void initState() {
     super.initState();
@@ -51,7 +47,6 @@ class _HomeScreenState extends State<HomeScreen> {
     _wordsController.dispose();
     _scrollController.dispose();
     _parseDebounce?.cancel();
-    _tipTimer?.cancel();
     super.dispose();
   }
 
@@ -70,15 +65,6 @@ class _HomeScreenState extends State<HomeScreen> {
   void _refreshWordsNow() {
     _parseDebounce?.cancel();
     _cachedWords = widget.fileService.parseWords(_wordsController.text);
-  }
-
-  /// 在"词语列表"框上方显示保存反馈条，2 秒后自动消失
-  void _showInlineTip(String msg, {bool error = false}) {
-    _tipTimer?.cancel();
-    setState(() => _inlineTip = error ? '⚠ $msg' : '✓ $msg');
-    _tipTimer = Timer(const Duration(seconds: 2), () {
-      if (mounted) setState(() => _inlineTip = null);
-    });
   }
 
   Future<void> _loadLists() async {
@@ -133,7 +119,7 @@ class _HomeScreenState extends State<HomeScreen> {
       // 更新已有词单
       final updated = existing.copyWith(words: words);
       await widget.storage.upsertWordList(updated);
-      _showInlineTip('词单「$name」已更新（${words.length} 个词语）');
+      _showSnack('词单「$name」已更新（${words.length} 个词语）');
     } else {
       // 检查名称是否重复
       final dup = _wordLists.any((l) => l.name == name && l.id != _selectedListId);
@@ -149,7 +135,7 @@ class _HomeScreenState extends State<HomeScreen> {
       );
       await widget.storage.upsertWordList(newList);
       _selectedListId = newList.id;
-      _showInlineTip('词单「$name」已保存（${words.length} 个词语）');
+      _showSnack('词单「$name」已保存（${words.length} 个词语）');
     }
     await _loadLists();
   }
@@ -281,7 +267,6 @@ class _HomeScreenState extends State<HomeScreen> {
       _nameController.clear();
       _wordsController.clear();
       _cachedWords = [];
-      _inlineTip = null;
       _selectedListId = null;
     });
   }
@@ -345,45 +330,10 @@ class _HomeScreenState extends State<HomeScreen> {
                     ),
                   ),
                   const SizedBox(height: 12),
-                  // 保存反馈条（紧贴词语列表框上边框）
-                  AnimatedSize(
-                    duration: const Duration(milliseconds: 200),
-                    child: _inlineTip == null
-                        ? const SizedBox(width: double.infinity)
-                        : Container(
-                            width: double.infinity,
-                            margin: const EdgeInsets.only(bottom: 8),
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 12, vertical: 10),
-                            decoration: BoxDecoration(
-                              color: _inlineTip!.startsWith('⚠')
-                                  ? Colors.red.shade50
-                                  : Colors.green.shade50,
-                              border: Border.all(
-                                color: _inlineTip!.startsWith('⚠')
-                                    ? Colors.red.shade300
-                                    : Colors.green.shade400,
-                              ),
-                              borderRadius: const BorderRadius.only(
-                                topLeft: Radius.circular(4),
-                                topRight: Radius.circular(4),
-                              ),
-                            ),
-                            child: Text(
-                              _inlineTip!,
-                              style: TextStyle(
-                                fontSize: 13,
-                                color: _inlineTip!.startsWith('⚠')
-                                    ? Colors.red.shade700
-                                    : Colors.green.shade800,
-                              ),
-                            ),
-                          ),
-                  ),
                   // 词语编辑框
                   TextField(
                     controller: _wordsController,
-                    maxLines: 10,
+                    maxLines: 7,
                     decoration: InputDecoration(
                       labelText: '词语列表',
                       hintText: '一行一个词，可听写英语单词或完整句子\n例如：\n苹果\nbanana\nHow old are you?',
