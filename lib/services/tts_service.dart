@@ -8,6 +8,44 @@ class TtsService {
   String? _engineName;
   String? _languageCode;
 
+  // 语速倍率（Android: 1.0=正常，0.75=慢，1.25=快）
+  double _rate = 1.0;
+  // 是否在每个词语前播放提示音
+  bool _beepEnabled = true;
+
+  /// 设置语速倍率（0.75 / 1.0 / 1.25）
+  Future<void> setSpeed(double rate) async {
+    _rate = rate;
+    if (_initialized) {
+      try {
+        await _tts.setSpeechRate(rate);
+      } catch (_) {}
+    }
+  }
+
+  /// 设置是否开启提示音
+  void setBeepEnabled(bool enabled) {
+    _beepEnabled = enabled;
+  }
+
+  /// 播放提示音（短促"嘀"声），由听写页在每个词前调用
+  Future<void> playBeep() async {
+    await init();
+    try {
+      // 提示音不受语速影响，用正常语速读一个短促的"嘀"
+      await _tts.setSpeechRate(1.0);
+      await _tts.speak('嘀').timeout(
+        const Duration(seconds: 2),
+        onTimeout: () => _tts.stop(),
+      );
+      await _tts.setSpeechRate(_rate);
+    } catch (_) {
+      try {
+        await _tts.setSpeechRate(_rate);
+      } catch (_) {}
+    }
+  }
+
   /// 初始化 TTS 引擎
   Future<void> init() async {
     if (_initialized) return;
@@ -67,7 +105,7 @@ class TtsService {
         } catch (_) {}
       }
 
-      await _tts.setSpeechRate(0.5);
+      await _tts.setSpeechRate(_rate);
       await _tts.setVolume(1.0);
       await _tts.setPitch(1.0);
       await _tts.awaitSpeakCompletion(true);
@@ -147,6 +185,10 @@ class TtsService {
   Future<void> speak(String text, {int repeat = 1, int timeout = 8}) async {
     if (text.isEmpty) return;
     await init();
+    // 每次播报前确保使用当前语速
+    try {
+      await _tts.setSpeechRate(_rate);
+    } catch (_) {}
 
     for (int i = 0; i < repeat; i++) {
       try {

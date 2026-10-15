@@ -111,6 +111,8 @@ class StorageService {
         'readCount': 1, // 1 / 2
         'interval': 5, // 秒
         'shuffle': true,
+        'speed': 1.0, // 语速：0.75 / 1.0 / 1.25
+        'beep': true, // 每词前提示音
       };
     }
     try {
@@ -121,6 +123,8 @@ class StorageService {
         'readCount': 1,
         'interval': 5,
         'shuffle': true,
+        'speed': 1.0,
+        'beep': true,
       };
     }
   }

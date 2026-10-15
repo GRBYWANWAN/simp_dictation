@@ -96,17 +96,16 @@ class FileService {
   }
 
   /// 解析文本为词语列表
-  /// 支持：一行一个词语，或空格/逗号/分号/顿号分隔
+  /// 以"行"为单位，一行一个词（支持英语单词、英语句子、带空格的内容）
+  /// 仅按换行分割，不再按空格/逗号等切分，保证整句完整
   List<String> parseWords(String text) {
-    // 统一换行符
     final normalized = text.replaceAll('\r\n', '\n').replaceAll('\r', '\n');
-    // 按换行、空格、逗号、分号、顿号分割
-    final parts = normalized.split(RegExp(r'[\n\s,，;；、]+'));
+    final lines = normalized.split('\n');
     // 去空、去重（保留首次出现顺序）
     final seen = <String>{};
     final result = <String>[];
-    for (final p in parts) {
-      final trimmed = p.trim();
+    for (final line in lines) {
+      final trimmed = line.trim();
       if (trimmed.isNotEmpty && seen.add(trimmed)) {
         result.add(trimmed);
       }
