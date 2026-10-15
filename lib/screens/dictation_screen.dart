@@ -36,6 +36,8 @@ class _DictationScreenState extends State<DictationScreen> {
   int _readCount = 1;
   int _intervalSeconds = 5;
   bool _shuffle = true;
+  double _speed = 1.0; // 语速：0.75 / 1.0 / 1.25
+  bool _beepEnabled = true; // 每个词前播放提示音
 
   // 运行状态
   DictationStatus _status = DictationStatus.idle;
@@ -77,7 +79,11 @@ class _DictationScreenState extends State<DictationScreen> {
       _readCount = (s['readCount'] as int?) ?? 1;
       _intervalSeconds = (s['interval'] as int?) ?? 5;
       _shuffle = (s['shuffle'] as bool?) ?? true;
+      _speed = (s['speed'] as num?)?.toDouble() ?? 1.0;
+      _beepEnabled = (s['beep'] as bool?) ?? true;
     });
+    await _tts.setSpeed(_speed);
+    _tts.setBeepEnabled(_beepEnabled);
   }
 
   /// 保存设置
@@ -87,6 +93,8 @@ class _DictationScreenState extends State<DictationScreen> {
       'readCount': _readCount,
       'interval': _intervalSeconds,
       'shuffle': _shuffle,
+      'speed': _speed,
+      'beep': _beepEnabled,
     });
   }
 
@@ -161,6 +169,13 @@ class _DictationScreenState extends State<DictationScreen> {
     setState(() => _isSpeaking = true);
 
     try {
+      // 每个词语前先播放"嘀"提示音，间隔 1 秒后再播报词语
+      if (_beepEnabled) {
+        await _tts.playBeep();
+        if (_status != DictationStatus.running) return;
+        await Future.delayed(const Duration(seconds: 1));
+        if (_status != DictationStatus.running) return;
+      }
       await _tts.speak(word, repeat: _readCount);
     } catch (e) {
       _log('⚠ 播报出错：$e');
@@ -376,12 +391,59 @@ class _DictationScreenState extends State<DictationScreen> {
           const SizedBox(height: 8),
           Row(
             children: [
+              const Text('语速：', style: TextStyle(fontWeight: FontWeight.bold)),
+              ChoiceChip(
+                label: const Text('0.75'),
+                selected: _speed == 0.75,
+                onSelected: disabled
+                    ? null
+                    : (v) async {
+                        setState(() => _speed = 0.75);
+                        await _tts.setSpeed(0.75);
+                      },
+              ),
+              const SizedBox(width: 8),
+              ChoiceChip(
+                label: const Text('1.0'),
+                selected: _speed == 1.0,
+                onSelected: disabled
+                    ? null
+                    : (v) async {
+                        setState(() => _speed = 1.0);
+                        await _tts.setSpeed(1.0);
+                      },
+              ),
+              const SizedBox(width: 8),
+              ChoiceChip(
+                label: const Text('1.25'),
+                selected: _speed == 1.25,
+                onSelected: disabled
+                    ? null
+                    : (v) async {
+                        setState(() => _speed = 1.25);
+                        await _tts.setSpeed(1.25);
+                      },
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              const Text('提示音：', style: TextStyle(fontWeight: FontWeight.bold)),
+              Switch(
+                value: _beepEnabled,
+                onChanged: disabled
+                    ? null
+                    : (v) => setState(() => _beepEnabled = v),
+              ),
+              const Text('每词前"嘀"一声', style: TextStyle(fontSize: 13)),
+              const Spacer(),
               const Text('随机打乱：', style: TextStyle(fontWeight: FontWeight.bold)),
               Switch(
                 value: _shuffle,
                 onChanged: disabled ? null : (v) => setState(() => _shuffle = v),
               ),
-              const Spacer(),
+              const SizedBox(width: 8),
               OutlinedButton.icon(
                 onPressed: () async {
                   _log('🔊 正在诊断并播放测试语音...');

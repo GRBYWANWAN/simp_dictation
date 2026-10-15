@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import '../models/word_list.dart';
 import '../services/storage_service.dart';
@@ -29,10 +30,19 @@ class _HomeScreenState extends State<HomeScreen> {
   String? _selectedListId;
   bool _loading = true;
 
+  // 缓存解析结果，避免每次 build 都对全文做正则/去重（大词单卡顿主因）
+  List<String> _cachedWords = [];
+  Timer? _parseDebounce;
+
+  // 保存反馈条（显示在词语列表框上方）
+  String? _inlineTip;
+  Timer? _tipTimer;
+
   @override
   void initState() {
     super.initState();
     _loadLists();
+    _wordsController.addListener(_onWordsChanged);
   }
 
   @override
@@ -40,7 +50,35 @@ class _HomeScreenState extends State<HomeScreen> {
     _nameController.dispose();
     _wordsController.dispose();
     _scrollController.dispose();
+    _parseDebounce?.cancel();
+    _tipTimer?.cancel();
     super.dispose();
+  }
+
+  /// 文本变化时刷新缓存（轻量去抖，避免逐字输入时频繁解析）
+  void _onWordsChanged() {
+    _parseDebounce?.cancel();
+    _parseDebounce = Timer(const Duration(milliseconds: 120), () {
+      if (!mounted) return;
+      setState(() {
+        _cachedWords = widget.fileService.parseWords(_wordsController.text);
+      });
+    });
+  }
+
+  /// 立即刷新缓存（加载词单等需要同步结果时调用）
+  void _refreshWordsNow() {
+    _parseDebounce?.cancel();
+    _cachedWords = widget.fileService.parseWords(_wordsController.text);
+  }
+
+  /// 在"词语列表"框上方显示保存反馈条，2 秒后自动消失
+  void _showInlineTip(String msg, {bool error = false}) {
+    _tipTimer?.cancel();
+    setState(() => _inlineTip = error ? '⚠ $msg' : '✓ $msg');
+    _tipTimer = Timer(const Duration(seconds: 2), () {
+      if (mounted) setState(() => _inlineTip = null);
+    });
   }
 
   Future<void> _loadLists() async {
@@ -52,9 +90,8 @@ class _HomeScreenState extends State<HomeScreen> {
     });
   }
 
-  /// 解析编辑框文本为词语列表
-  List<String> get _currentWords =>
-      widget.fileService.parseWords(_wordsController.text);
+  /// 解析编辑框文本为词语列表（使用缓存，build 时不再重复解析）
+  List<String> get _currentWords => _cachedWords;
 
   /// 显示 Snackbar
   void _showSnack(String msg, {bool error = false}) {
@@ -69,8 +106,9 @@ class _HomeScreenState extends State<HomeScreen> {
 
   /// 保存词单（新建或更新）
   Future<void> _saveList() async {
+    _refreshWordsNow();
     final name = _nameController.text.trim();
-    final words = _currentWords;
+    final words = _cachedWords;
 
     if (name.isEmpty) {
       _showSnack('请输入词单名称', error: true);
@@ -95,7 +133,7 @@ class _HomeScreenState extends State<HomeScreen> {
       // 更新已有词单
       final updated = existing.copyWith(words: words);
       await widget.storage.upsertWordList(updated);
-      _showSnack('词单「$name」已更新（${words.length} 个词语）');
+      _showInlineTip('词单「$name」已更新（${words.length} 个词语）');
     } else {
       // 检查名称是否重复
       final dup = _wordLists.any((l) => l.name == name && l.id != _selectedListId);
@@ -111,7 +149,7 @@ class _HomeScreenState extends State<HomeScreen> {
       );
       await widget.storage.upsertWordList(newList);
       _selectedListId = newList.id;
-      _showSnack('词单「$name」已保存（${words.length} 个词语）');
+      _showInlineTip('词单「$name」已保存（${words.length} 个词语）');
     }
     await _loadLists();
   }
@@ -124,6 +162,8 @@ class _HomeScreenState extends State<HomeScreen> {
       setState(() {
         _selectedListId = id;
         _nameController.text = list.name;
+        // 先更新缓存，避免赋值后 debounce 期间统计为旧值
+        _cachedWords = List.of(list.words);
         _wordsController.text = list.words.join('\n');
       });
       _showSnack('已加载「${list.name}」（${list.wordCount} 个词语）');
@@ -170,6 +210,7 @@ class _HomeScreenState extends State<HomeScreen> {
         _selectedListId = null;
         _nameController.clear();
         _wordsController.clear();
+        _cachedWords = [];
       });
       await _loadLists();
       _showSnack('词单「${list.name}」已删除');
@@ -202,6 +243,7 @@ class _HomeScreenState extends State<HomeScreen> {
         return;
       }
       setState(() {
+        _cachedWords = words;
         _wordsController.text = words.join('\n');
       });
       _showSnack('已导入 ${words.length} 个词语');
@@ -212,7 +254,8 @@ class _HomeScreenState extends State<HomeScreen> {
 
   /// 导出 TXT
   Future<void> _exportTxt() async {
-    final words = _currentWords;
+    _refreshWordsNow();
+    final words = _cachedWords;
     if (words.isEmpty) {
       _showSnack('编辑框为空，没有可导出的词语', error: true);
       return;
@@ -237,13 +280,16 @@ class _HomeScreenState extends State<HomeScreen> {
     setState(() {
       _nameController.clear();
       _wordsController.clear();
+      _cachedWords = [];
+      _inlineTip = null;
       _selectedListId = null;
     });
   }
 
   /// 开始听写
   void _startDictation() {
-    final words = _currentWords;
+    _refreshWordsNow();
+    final words = _cachedWords;
     if (words.isEmpty) {
       _showSnack('请先输入或加载词语', error: true);
       return;
@@ -299,19 +345,56 @@ class _HomeScreenState extends State<HomeScreen> {
                     ),
                   ),
                   const SizedBox(height: 12),
+                  // 保存反馈条（紧贴词语列表框上边框）
+                  AnimatedSize(
+                    duration: const Duration(milliseconds: 200),
+                    child: _inlineTip == null
+                        ? const SizedBox(width: double.infinity)
+                        : Container(
+                            width: double.infinity,
+                            margin: const EdgeInsets.only(bottom: 8),
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 12, vertical: 10),
+                            decoration: BoxDecoration(
+                              color: _inlineTip!.startsWith('⚠')
+                                  ? Colors.red.shade50
+                                  : Colors.green.shade50,
+                              border: Border.all(
+                                color: _inlineTip!.startsWith('⚠')
+                                    ? Colors.red.shade300
+                                    : Colors.green.shade400,
+                              ),
+                              borderRadius: const BorderRadius.only(
+                                topLeft: Radius.circular(4),
+                                topRight: Radius.circular(4),
+                              ),
+                            ),
+                            child: Text(
+                              _inlineTip!,
+                              style: TextStyle(
+                                fontSize: 13,
+                                color: _inlineTip!.startsWith('⚠')
+                                    ? Colors.red.shade700
+                                    : Colors.green.shade800,
+                              ),
+                            ),
+                          ),
+                  ),
                   // 词语编辑框
                   TextField(
                     controller: _wordsController,
                     maxLines: 10,
                     decoration: InputDecoration(
                       labelText: '词语列表',
-                      hintText: '一行一个词语，或用空格/逗号分隔\n例如：\n苹果\n香蕉\n橘子',
+                      hintText: '一行一个词，可听写英语单词或完整句子\n例如：\n苹果\nbanana\nHow old are you?',
                       border: const OutlineInputBorder(),
                       alignLabelWithHint: true,
                       suffixIcon: IconButton(
                         icon: const Icon(Icons.clear),
-                        onPressed: () =>
-                            setState(() => _wordsController.clear()),
+                        onPressed: () => setState(() {
+                          _wordsController.clear();
+                          _cachedWords = [];
+                        }),
                       ),
                     ),
                   ),
