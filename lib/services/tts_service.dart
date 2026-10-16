@@ -43,13 +43,12 @@ class TtsService {
     await Future.delayed(const Duration(milliseconds: 600));
   }
 
-  /// 初始化 TTS 引擎（已优化：秒级响应，完全跟随手机系统当前选择的引擎）
+  /// 初始化 TTS 引擎（秒级响应，完全跟随手机系统当前选择的引擎）
   Future<void> init() async {
     if (_initialized) return;
 
     try {
-      // 1. 直接使用系统当前默认的 TTS 引擎（不主动显式抢占 setEngine），
-      // 这样能完美跟随系统设置中切换的引擎（如 Google 或无障碍引擎），并省去几十秒的等待和延迟。
+      // 1. 直接使用手机系统当前默认的 TTS 引擎，完美跟随系统设置
       _engineName = '手机系统默认引擎';
 
       // 2. 快速获取系统当前引擎支持的语言（单次获取，不轮询等待）
@@ -160,8 +159,6 @@ class TtsService {
   }
 
   /// 朗读文字
-  /// [repeat] 朗读遍数
-  /// [repeatIntervalSeconds] 朗读两遍时，第一遍与第二遍之间的间隔（秒）
   Future<void> speak(String text, {
     int repeat = 1,
     int timeout = 8,
@@ -169,7 +166,6 @@ class TtsService {
   }) async {
     if (text.isEmpty) return;
     await init();
-    // 每次播报前确保使用当前语速
     try {
       await _tts.setSpeechRate(_rate);
     } catch (_) {}
@@ -190,7 +186,7 @@ class TtsService {
     }
   }
 
-  /// 切换系统引擎后重置初始化状态（可在设置更改或页面返回时调用）
+  /// 切换系统引擎后重置初始化状态
   void reset() {
     _initialized = false;
   }
