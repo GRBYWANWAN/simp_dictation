@@ -43,65 +43,46 @@ class TtsService {
     await Future.delayed(const Duration(milliseconds: 600));
   }
 
-  /// 初始化 TTS 引擎
+  /// 初始化 TTS 引擎（已优化：秒级响应，完全跟随手机系统当前选择的引擎）
   Future<void> init() async {
     if (_initialized) return;
 
     try {
-      // 1. 按优先级直接绑定引擎（不依赖 getEngines 列表，
-      //    部分手机 getEngines 返回空，但显式 setEngine 可成功绑定）
-      const enginePriorities = [
-        'com.oplus.ttsaccessibilityengine', // 系统无障碍引擎（中文温柔女声）
-        'com.yuemeng.speechsuite', // 语音套件
-        'com.google.android.tts', // Google 兜底
-      ];
-      for (final engine in enginePriorities) {
-        try {
-          await _tts.setEngine(engine);
-          _engineName = '$engine (显式绑定)';
-          // 切换引擎后系统需重新绑定，给足时间
-          await Future.delayed(const Duration(milliseconds: 1500));
-          // 绑定后验证语言列表是否就绪
-          final langs = await _tts.getLanguages;
-          if (langs is List && langs.isNotEmpty) break;
-        } catch (_) {
-          // 该引擎不可用，继续尝试下一个
-        }
-      }
+      // 1. 直接使用系统当前默认的 TTS 引擎（不主动显式抢占 setEngine），
+      // 这样能完美跟随系统设置中切换的引擎（如 Google 或无障碍引擎），并省去几十秒的等待和延迟。
+      _engineName = '手机系统默认引擎';
 
-      // 2. 等待引擎就绪（轮询语言列表，最多 5 秒）
-      for (int attempt = 0; attempt < 6; attempt++) {
-        try {
-          final langs = await _tts.getLanguages;
-          if (langs is List && langs.isNotEmpty) {
-            final langStrs = langs.map((e) => e.toString()).toList();
-            for (final code in ['zh-CN', 'zh_CN', 'cmn-Hans-CN', 'zh-TW', 'zh']) {
-              if (langStrs.any((l) => l == code || l.startsWith(code))) {
-                _languageCode = code;
+      // 2. 快速获取系统当前引擎支持的语言（单次获取，不轮询等待）
+      try {
+        final langs = await _tts.getLanguages;
+        if (langs is List && langs.isNotEmpty) {
+          final langStrs = langs.map((e) => e.toString()).toList();
+          for (final code in ['zh-CN', 'zh_CN', 'cmn-Hans-CN', 'zh-TW', 'zh']) {
+            if (langStrs.any((l) => l == code || l.startsWith(code))) {
+              _languageCode = code;
+              break;
+            }
+          }
+          if (_languageCode == null) {
+            for (final l in langStrs) {
+              if (l.toLowerCase().startsWith('zh') ||
+                  l.toLowerCase().contains('chinese')) {
+                _languageCode = l;
                 break;
               }
             }
-            if (_languageCode == null) {
-              for (final l in langStrs) {
-                if (l.toLowerCase().startsWith('zh') ||
-                    l.toLowerCase().contains('chinese')) {
-                  _languageCode = l;
-                  break;
-                }
-              }
-            }
-            if (_languageCode != null) break;
           }
-        } catch (_) {}
-        await Future.delayed(const Duration(milliseconds: 800));
-      }
+        }
+      } catch (_) {}
 
-      if (_languageCode != null) {
-        try {
-          await _tts.setLanguage(_languageCode!);
-        } catch (_) {}
-      }
+      // 如果未匹配到具体代码，兜底使用标准 zh-CN
+      _languageCode ??= 'zh-CN';
 
+      try {
+        await _tts.setLanguage(_languageCode!);
+      } catch (_) {}
+
+      // 3. 一次性设置基础参数
       await _tts.setSpeechRate(_rate);
       await _tts.setVolume(1.0);
       await _tts.setPitch(1.0);
@@ -207,6 +188,11 @@ class TtsService {
         await Future.delayed(Duration(seconds: repeatIntervalSeconds));
       }
     }
+  }
+
+  /// 切换系统引擎后重置初始化状态（可在设置更改或页面返回时调用）
+  void reset() {
+    _initialized = false;
   }
 
   Future<void> stop() async {
