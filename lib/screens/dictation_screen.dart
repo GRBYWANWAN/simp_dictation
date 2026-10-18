@@ -46,10 +46,10 @@ class _DictationScreenState extends State<DictationScreen> {
   double _speed = 1.0; // 语速：0.75 / 1.0 / 1.25
   bool _beepEnabled = true; // 每个词前播放提示音
 
-  /// 自动模式下每个词播报完后的总等待秒数
-  /// 读2遍时 = 基础间隔 + 两遍间隔
-  int get _totalInterval =>
-      _intervalSeconds + (_readCount == 2 ? _repeatIntervalSeconds : 0);
+  /// 自动模式下，最后一遍朗读播完后等待的秒数。
+  /// 注意：两遍之间的间隔 X 已在朗读过程中（第一遍→第二遍之间）消耗掉，
+  /// 这里只取基础词间间隔 Y，不再额外累加 X，否则第二遍播完会多等 X 秒。
+  int get _totalInterval => _intervalSeconds;
 
   // 运行状态
   DictationStatus _status = DictationStatus.idle;
@@ -519,8 +519,7 @@ class _DictationScreenState extends State<DictationScreen> {
                 child: Padding(
                   padding: const EdgeInsets.only(top: 2, left: 4),
                   child: Text(
-                    '每词总间隔 $_totalInterval 秒'
-                    '（基础 $_intervalSeconds + 两遍 $_repeatIntervalSeconds）',
+                    '词间间隔 $_intervalSeconds 秒（最后一遍播完后等待）',
                     style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
                   ),
                 ),
