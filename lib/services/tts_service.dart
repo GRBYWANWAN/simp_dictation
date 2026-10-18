@@ -15,6 +15,9 @@ class TtsService {
   double _rate = 1.0;
   // 是否在每个词语前播放提示音
   bool _beepEnabled = true;
+  // 播报代次令牌：每次新的 speak()/stop() 都会让旧的播报循环作废，
+  // 防止"两遍间隔等待中被切词后，旧词第二遍仍被播出来"的 bug。
+  int _speakToken = 0;
 
   /// 设置语速倍率（0.5 / 0.75 / 1.0 / 1.25）
   Future<void> setSpeed(double rate) async {
@@ -166,11 +169,14 @@ class TtsService {
   }) async {
     if (text.isEmpty) return;
     await init();
+    // 本次播报的代次：之后一旦 stop() 或新的 speak() 发生，令牌变化，本循环立即停止。
+    final myToken = ++_speakToken;
     try {
       await _tts.setSpeechRate(_rate);
     } catch (_) {}
 
     for (int i = 0; i < repeat; i++) {
+      if (_speakToken != myToken) return; // 已被切词/停止取代，不再继续
       try {
         await _tts.stop();
         await _tts.speak(text).timeout(
@@ -182,6 +188,7 @@ class TtsService {
       } catch (_) {}
       if (i < repeat - 1) {
         await Future.delayed(Duration(seconds: repeatIntervalSeconds));
+        if (_speakToken != myToken) return; // 两遍间隔期间被切词，不再播第二遍
       }
     }
   }
@@ -192,6 +199,9 @@ class TtsService {
   }
 
   Future<void> stop() async {
+    // 先让所有进行中的 speak() 循环立即作废（同步生效），
+    // 这样"两遍间隔等待中"的旧循环醒来后不会再播第二遍。
+    _speakToken++;
     try {
       await _tts.stop();
     } catch (_) {}
