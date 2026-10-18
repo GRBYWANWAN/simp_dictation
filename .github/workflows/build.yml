@@ -60,41 +60,41 @@ jobs:
           PKG=$(grep -h '^package ' "$MAIN_ACTIVITY" | head -1 | sed 's/package //')
           echo "package: $PKG"
           cat > "$MAIN_ACTIVITY" <<EOF
-package $PKG
+          package $PKG
 
-import android.content.Context
-import android.os.PowerManager
-import io.flutter.embedding.android.FlutterActivity
-import io.flutter.embedding.engine.FlutterEngine
-import io.flutter.plugin.common.MethodChannel
+          import android.content.Context
+          import android.os.PowerManager
+          import io.flutter.embedding.android.FlutterActivity
+          import io.flutter.embedding.engine.FlutterEngine
+          import io.flutter.plugin.common.MethodChannel
 
-class MainActivity: FlutterActivity() {
-  private var wakeLock: PowerManager.WakeLock? = null
-  private val CHANNEL = "dictation/wakelock"
+          class MainActivity: FlutterActivity() {
+            private var wakeLock: PowerManager.WakeLock? = null
+            private val CHANNEL = "dictation/wakelock"
 
-  override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
-    super.configureFlutterEngine(flutterEngine)
-    MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL).setMethodCallHandler { call, result ->
-      when (call.method) {
-        "enable" -> {
-          if (wakeLock == null) {
-            val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
-            wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "dictation:partial_wakelock")
-            wakeLock?.acquire()
+            override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
+              super.configureFlutterEngine(flutterEngine)
+              MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL).setMethodCallHandler { call, result ->
+                when (call.method) {
+                  "enable" -> {
+                    if (wakeLock == null) {
+                      val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
+                      wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "dictation:partial_wakelock")
+                      wakeLock?.acquire()
+                    }
+                    result.success(true)
+                  }
+                  "disable" -> {
+                    try { wakeLock?.let { if (it.isHeld) it.release() } } catch (_: Exception) {}
+                    wakeLock = null
+                    result.success(true)
+                  }
+                  else -> result.notImplemented()
+                }
+              }
+            }
           }
-          result.success(true)
-        }
-        "disable" -> {
-          try { wakeLock?.let { if (it.isHeld) it.release() } } catch (_: Exception) {}
-          wakeLock = null
-          result.success(true)
-        }
-        else -> result.notImplemented()
-      }
-    }
-  }
-}
-EOF
+          EOF
           echo "=== MainActivity.kt 注入后 ==="
           cat "$MAIN_ACTIVITY"
 
