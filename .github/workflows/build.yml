@@ -41,21 +41,63 @@ jobs:
           sed -i 's/compileSdk = .*/compileSdk = 36/' android/app/build.gradle.kts
           sed -i 's/android:label="simple_dictation"/android:label="简易听写"/' android/app/src/main/AndroidManifest.xml
           echo "android.suppressUnsupportedCompileSdk=36" >> android/gradle.properties
-          # Android 11+ 包可见性：必须声明 queries 才能查询/绑定 TTS 引擎（单行 XML，最可靠）
+          # Android 11+ 包可见性：必须声明 queries 才能查询/绑定 TTS 引擎
           sed -i 's#</manifest>#<queries><intent><action android:name="android.intent.action.TTS_SERVICE"/></intent><package android:name="com.oplus.ttsaccessibilityengine"/><package android:name="com.yuemeng.speechsuite"/><package android:name="com.google.android.tts"/></queries></manifest>#' android/app/src/main/AndroidManifest.xml
-          # 前台服务（flutter_foreground_task）：锁屏/黑屏时继续播报。
-          # 1) dataSync 类型权限（FOREGROUND_SERVICE / WAKE_LOCK / POST_NOTIFICATIONS 由插件自带 manifest 合并）
-          sed -i 's#<application#<uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC"/><application#' android/app/src/main/AndroidManifest.xml
-          # 2) 注册前台服务（服务名不可改，stopWithTask=true：划掉 App 时自动停止）
-          sed -i 's#</application>#<service android:name="com.pravera.flutter_foreground_task.service.ForegroundService" android:foregroundServiceType="dataSync" android:stopWithTask="true" android:exported="false"/></application>#' android/app/src/main/AndroidManifest.xml
-          echo "=== AndroidManifest 最终内容（请确认包含 TTS_SERVICE 与 ForegroundService）==="
+          # 黑屏/锁屏后保持 CPU 运行：普通唤醒锁权限（无需通知、无需前台服务组件）
+          sed -i 's#<application#<uses-permission android:name="android.permission.WAKE_LOCK"/><application#' android/app/src/main/AndroidManifest.xml
+          echo "=== AndroidManifest 最终内容 ==="
           cat android/app/src/main/AndroidManifest.xml
           grep -q "TTS_SERVICE" android/app/src/main/AndroidManifest.xml \
             && echo "TTS_OK" \
             || { echo "TTS_MISSING"; exit 1; }
-          grep -q "flutter_foreground_task.service.ForegroundService" android/app/src/main/AndroidManifest.xml \
-            && echo "FGS_OK" \
-            || { echo "FGS_MISSING"; exit 1; }
+          grep -q "android.permission.WAKE_LOCK" android/app/src/main/AndroidManifest.xml \
+            && echo "WAKELOCK_OK" \
+            || { echo "WAKELOCK_MISSING"; exit 1; }
+
+          # 定位 flutter create 生成的 MainActivity.kt，并注入持有 PARTIAL_WAKE_LOCK 的 MethodChannel
+          MAIN_ACTIVITY=$(find android/app/src/main -name "MainActivity.kt" | head -1)
+          echo "MainActivity at: $MAIN_ACTIVITY"
+          PKG=$(grep -h '^package ' "$MAIN_ACTIVITY" | head -1 | sed 's/package //')
+          echo "package: $PKG"
+          cat > "$MAIN_ACTIVITY" <<EOF
+package $PKG
+
+import android.content.Context
+import android.os.PowerManager
+import io.flutter.embedding.android.FlutterActivity
+import io.flutter.embedding.engine.FlutterEngine
+import io.flutter.plugin.common.MethodChannel
+
+class MainActivity: FlutterActivity() {
+  private var wakeLock: PowerManager.WakeLock? = null
+  private val CHANNEL = "dictation/wakelock"
+
+  override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
+    super.configureFlutterEngine(flutterEngine)
+    MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL).setMethodCallHandler { call, result ->
+      when (call.method) {
+        "enable" -> {
+          if (wakeLock == null) {
+            val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
+            wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "dictation:partial_wakelock")
+            wakeLock?.acquire()
+          }
+          result.success(true)
+        }
+        "disable" -> {
+          try { wakeLock?.let { if (it.isHeld) it.release() } } catch (_: Exception) {}
+          wakeLock = null
+          result.success(true)
+        }
+        else -> result.notImplemented()
+      }
+    }
+  }
+}
+EOF
+          echo "=== MainActivity.kt 注入后 ==="
+          cat "$MAIN_ACTIVITY"
+
           # 强制所有插件模块用 compileSdk 36（必须放在 build.gradle.kts 开头）
           printf 'subprojects {\n    afterEvaluate {\n        val a = extensions.findByName("android")\n        if (a is com.android.build.gradle.LibraryExtension) {\n            a.compileSdk = 36\n        }\n    }\n}\n' > android/build.gradle.kts.tmp
           cat android/build.gradle.kts >> android/build.gradle.kts.tmp
