@@ -161,6 +161,14 @@ class TtsService {
     await playTestRaw('你好，这是语音测试');
   }
 
+  /// 仅停止 TTS 引擎当前播报，不改动播报令牌。
+  /// 供 speak() 循环内部使用（每遍之前清掉上一遍声音），避免误触发"切词作废"逻辑。
+  Future<void> _engineStop() async {
+    try {
+      await _tts.stop();
+    } catch (_) {}
+  }
+
   /// 朗读文字
   Future<void> speak(String text, {
     int repeat = 1,
@@ -178,11 +186,11 @@ class TtsService {
     for (int i = 0; i < repeat; i++) {
       if (_speakToken != myToken) return; // 已被切词/停止取代，不再继续
       try {
-        await _tts.stop();
+        await _engineStop();
         await _tts.speak(text).timeout(
           Duration(seconds: timeout),
           onTimeout: () {
-            _tts.stop();
+            _engineStop();
           },
         );
       } catch (_) {}

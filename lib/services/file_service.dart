@@ -13,11 +13,18 @@ class FileService {
   /// 返回文件内容字符串，用户取消时返回 null
   Future<String?> importTxt() async {
     try {
+      // 尽量让文件选择器初始定位到系统 Download 目录
+      String? initialDir;
+      try {
+        final d = await getDownloadsDirectory();
+        initialDir = d?.path;
+      } catch (_) {}
       final result = await FilePicker.platform.pickFiles(
         type: FileType.custom,
         allowedExtensions: ['txt'],
         allowMultiple: false,
         withData: true,
+        initialDirectory: initialDir,
       );
       if (result == null || result.files.isEmpty) return null;
 
@@ -44,24 +51,41 @@ class FileService {
       final content = words.join('\n');
       final bytes = _encodeString(content);
 
-      if (Platform.isAndroid || Platform.isIOS) {
-        // 移动端：file_picker 必须直接传 bytes，由系统 SAF 写入
+      if (Platform.isAndroid) {
+        // 优先直接写入系统 Download 目录：导出后用户在 Download 文件夹即可直接找到，
+        // 不必再翻目录。若因 Android 分区存储限制写入失败，再回退到系统保存对话框。
+        try {
+          final dir = await getDownloadsDirectory();
+          if (dir != null) {
+            final ts = DateTime.now().millisecondsSinceEpoch;
+            final path = '${dir.path}/${fileName}_$ts.txt';
+            await File(path).writeAsBytes(bytes);
+            return path;
+          }
+        } catch (_) {
+          // 直接写 Download 被系统拒绝，回退到 SAF 选择器
+        }
+        // 回退：由系统 SAF 写入（提示用户选 Download）
         final outputPath = await FilePicker.platform.saveFile(
-          dialogTitle: '导出词单为 TXT',
+          dialogTitle: '导出词单为 TXT（请选 Download 文件夹）',
           fileName: '$fileName.txt',
           type: FileType.custom,
           allowedExtensions: ['txt'],
           bytes: bytes,
         );
-        // outputPath 为 null 表示用户取消（移动端文件已由系统写入）
         return outputPath;
       } else {
         // 桌面端（Windows/macOS/Linux）：选择保存路径后自己写文件
+        String? downloadsDir;
+        try {
+          downloadsDir = (await getDownloadsDirectory())?.path;
+        } catch (_) {}
         String? outputPath = await FilePicker.platform.saveFile(
           dialogTitle: '导出词单为 TXT',
           fileName: '$fileName.txt',
           type: FileType.custom,
           allowedExtensions: ['txt'],
+          initialDirectory: downloadsDir,
         );
 
         if (outputPath == null) {
