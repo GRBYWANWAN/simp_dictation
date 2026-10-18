@@ -280,6 +280,9 @@ class _DictationScreenState extends State<DictationScreen> {
   void _manualNext() {
     if (_status != DictationStatus.running) return;
     _countdownTimer?.cancel();
+    // 立即打断当前播报：令牌让旧的播报循环（含两遍间隔中等待的第二遍）作废，
+    // 避免切到 B 后，A 的第二遍间隔一到又被播出来。
+    _tts.stop();
     setState(() => _isSpeaking = false);
     _nextWord();
   }
