@@ -43,11 +43,19 @@ jobs:
           echo "android.suppressUnsupportedCompileSdk=36" >> android/gradle.properties
           # Android 11+ 包可见性：必须声明 queries 才能查询/绑定 TTS 引擎（单行 XML，最可靠）
           sed -i 's#</manifest>#<queries><intent><action android:name="android.intent.action.TTS_SERVICE"/></intent><package android:name="com.oplus.ttsaccessibilityengine"/><package android:name="com.yuemeng.speechsuite"/><package android:name="com.google.android.tts"/></queries></manifest>#' android/app/src/main/AndroidManifest.xml
-          echo "=== AndroidManifest 最终内容（请确认包含 TTS_SERVICE）==="
+          # 前台服务（flutter_foreground_task）：锁屏/黑屏时继续播报。
+          # 1) dataSync 类型权限（FOREGROUND_SERVICE / WAKE_LOCK / POST_NOTIFICATIONS 由插件自带 manifest 合并）
+          sed -i 's#<application#<uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC"/><application#' android/app/src/main/AndroidManifest.xml
+          # 2) 注册前台服务（服务名不可改，stopWithTask=true：划掉 App 时自动停止）
+          sed -i 's#</application>#<service android:name="com.pravera.flutter_foreground_task.service.ForegroundService" android:foregroundServiceType="dataSync" android:stopWithTask="true" android:exported="false"/></application>#' android/app/src/main/AndroidManifest.xml
+          echo "=== AndroidManifest 最终内容（请确认包含 TTS_SERVICE 与 ForegroundService）==="
           cat android/app/src/main/AndroidManifest.xml
           grep -q "TTS_SERVICE" android/app/src/main/AndroidManifest.xml \
             && echo "TTS_OK" \
             || { echo "TTS_MISSING"; exit 1; }
+          grep -q "flutter_foreground_task.service.ForegroundService" android/app/src/main/AndroidManifest.xml \
+            && echo "FGS_OK" \
+            || { echo "FGS_MISSING"; exit 1; }
           # 强制所有插件模块用 compileSdk 36（必须放在 build.gradle.kts 开头）
           printf 'subprojects {\n    afterEvaluate {\n        val a = extensions.findByName("android")\n        if (a is com.android.build.gradle.LibraryExtension) {\n            a.compileSdk = 36\n        }\n    }\n}\n' > android/build.gradle.kts.tmp
           cat android/build.gradle.kts >> android/build.gradle.kts.tmp
