@@ -30,9 +30,17 @@ class _DictationAppState extends State<DictationApp> {
   }
 
   Future<void> _init() async {
-    await _storage.init();
-    if (mounted) {
-      setState(() => _ready = true);
+    try {
+      // 最多等待 8 秒；即使本地存储初始化异常或 platform channel 卡顿，
+      // 也不能让用户永远停在"正在初始化"。
+      await _storage.init().timeout(const Duration(seconds: 8));
+    } catch (e) {
+      // 存储初始化失败也继续进入主页（读取时各接口均有容错）
+      debugPrint('storage init failed: $e');
+    } finally {
+      if (mounted) {
+        setState(() => _ready = true);
+      }
     }
   }
 
