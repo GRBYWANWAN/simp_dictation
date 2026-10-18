@@ -68,12 +68,23 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _loadLists() async {
+    if (!mounted) return;
     setState(() => _loading = true);
-    final lists = await widget.storage.loadWordLists();
-    setState(() {
-      _wordLists = lists;
-      _loading = false;
-    });
+    try {
+      final lists = await widget.storage.loadWordLists();
+      if (!mounted) return;
+      setState(() {
+        _wordLists = lists;
+        _loading = false;
+      });
+    } catch (e) {
+      // 存储未就绪等异常时不能永远转圈，降级为空列表
+      if (!mounted) return;
+      setState(() {
+        _wordLists = [];
+        _loading = false;
+      });
+    }
   }
 
   /// 解析编辑框文本为词语列表（使用缓存，build 时不再重复解析）

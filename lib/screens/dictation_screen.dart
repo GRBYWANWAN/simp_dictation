@@ -2,7 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import '../services/storage_service.dart';
 import '../services/tts_service.dart';
-import '../services/foreground_service.dart';
+import '../services/wake_lock_service.dart';
 
 /// 听写状态枚举
 enum DictationStatus { idle, running, paused, finished }
@@ -67,9 +67,6 @@ class _DictationScreenState extends State<DictationScreen> {
   @override
   void initState() {
     super.initState();
-    // 初始化前台服务（锁屏/黑屏继续播报）
-    ForegroundService.init();
-    ForegroundService.requestPermission();
     _initTts();
     _loadSettings();
   }
@@ -78,8 +75,8 @@ class _DictationScreenState extends State<DictationScreen> {
   void dispose() {
     _countdownTimer?.cancel();
     _tts.dispose();
-    // 离开页面时确保前台服务关闭
-    ForegroundService.stop();
+    // 离开页面时确保释放唤醒锁
+    WakeLockService.disable();
     _intervalCtrl.dispose();
     _repeatIntervalCtrl.dispose();
     _logScroll.dispose();
@@ -209,11 +206,8 @@ class _DictationScreenState extends State<DictationScreen> {
         '朗读 $_readCount 遍，词间间隔 $_intervalSeconds 秒'
         '${_readCount == 2 ? '，两遍间隔 $_repeatIntervalSeconds 秒' : ''}');
     _saveSettings();
-    // 启动前台服务：持有唤醒锁，锁屏/黑屏时仍能继续自动播报
-    await ForegroundService.start(
-      '正在听写',
-      '${widget.wordListName}：共 ${_shuffledWords.length} 个词语',
-    );
+    // 持有 PARTIAL_WAKE_LOCK：屏幕可关，但 CPU 不休眠，黑屏后倒计时照常走、TTS 自动播下一个词
+    await WakeLockService.enable();
     _nextWord();
   }
 
@@ -229,11 +223,6 @@ class _DictationScreenState extends State<DictationScreen> {
 
     final word = _shuffledWords[_currentIndex];
     _log('▶ 第 ${_currentIndex + 1}/${_shuffledWords.length} 个词：$word');
-    // 更新常驻通知进度（不显示具体词，避免锁屏时泄题）
-    ForegroundService.update(
-      '正在听写（第 ${_currentIndex + 1}/${_shuffledWords.length} 个）',
-      '锁屏/黑屏时会继续自动播报',
-    );
     setState(() => _isSpeaking = true);
 
     try {
@@ -323,7 +312,7 @@ class _DictationScreenState extends State<DictationScreen> {
   void _stop() {
     _countdownTimer?.cancel();
     _tts.stop();
-    ForegroundService.stop();
+    WakeLockService.disable();
     setState(() {
       _status = DictationStatus.idle;
       _currentIndex = -1;
@@ -336,7 +325,7 @@ class _DictationScreenState extends State<DictationScreen> {
   /// 完成
   void _finish() {
     _countdownTimer?.cancel();
-    ForegroundService.stop();
+    WakeLockService.disable();
     setState(() {
       _status = DictationStatus.finished;
       _isSpeaking = false;

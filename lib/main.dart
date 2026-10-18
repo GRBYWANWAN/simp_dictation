@@ -1,13 +1,10 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'services/storage_service.dart';
 import 'services/file_service.dart';
 import 'screens/home_screen.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
-  // 初始化前台服务与主界面的通信端口（锁屏继续播报用）
-  FlutterForegroundTask.initCommunicationPort();
   runApp(const DictationApp());
 }
 
