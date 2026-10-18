@@ -11,12 +11,12 @@ class TtsService {
   String? _engineName;
   String? _languageCode;
 
-  // 语速倍率（Android: 1.0=正常，0.75=慢，1.25=快）
+  // 语速倍率（Android: 1.0=正常，0.5/0.75=慢，1.25=快）
   double _rate = 1.0;
   // 是否在每个词语前播放提示音
   bool _beepEnabled = true;
 
-  /// 设置语速倍率（0.75 / 1.0 / 1.25）
+  /// 设置语速倍率（0.5 / 0.75 / 1.0 / 1.25）
   Future<void> setSpeed(double rate) async {
     _rate = rate;
     if (_initialized) {

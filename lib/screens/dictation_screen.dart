@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import '../services/storage_service.dart';
 import '../services/tts_service.dart';
+import '../services/foreground_service.dart';
 
 /// 听写状态枚举
 enum DictationStatus { idle, running, paused, finished }
@@ -30,6 +31,11 @@ class _DictationScreenState extends State<DictationScreen> {
   final TtsService _tts = TtsService();
   final ScrollController _logScroll = ScrollController();
   final List<String> _logs = [];
+  // 数字输入框控制器（保证异步加载设置后框内显示的是保存值）
+  final TextEditingController _intervalCtrl =
+      TextEditingController(text: '5');
+  final TextEditingController _repeatIntervalCtrl =
+      TextEditingController(text: '1');
 
   // 听写配置
   DictationMode _mode = DictationMode.auto;
@@ -61,6 +67,9 @@ class _DictationScreenState extends State<DictationScreen> {
   @override
   void initState() {
     super.initState();
+    // 初始化前台服务（锁屏/黑屏继续播报）
+    ForegroundService.init();
+    ForegroundService.requestPermission();
     _initTts();
     _loadSettings();
   }
@@ -69,6 +78,10 @@ class _DictationScreenState extends State<DictationScreen> {
   void dispose() {
     _countdownTimer?.cancel();
     _tts.dispose();
+    // 离开页面时确保前台服务关闭
+    ForegroundService.stop();
+    _intervalCtrl.dispose();
+    _repeatIntervalCtrl.dispose();
     _logScroll.dispose();
     super.dispose();
   }
@@ -89,6 +102,8 @@ class _DictationScreenState extends State<DictationScreen> {
       _speed = (s['speed'] as num?)?.toDouble() ?? 1.0;
       _beepEnabled = (s['beep'] as bool?) ?? true;
     });
+    _intervalCtrl.text = '$_intervalSeconds';
+    _repeatIntervalCtrl.text = '$_repeatIntervalSeconds';
     await _tts.setSpeed(_speed);
     _tts.setBeepEnabled(_beepEnabled);
   }
@@ -137,6 +152,40 @@ class _DictationScreenState extends State<DictationScreen> {
     );
   }
 
+  /// 测试语音：诊断 TTS 并播放测试音，弹窗显示诊断信息
+  Future<void> _showDiagnosis() async {
+    _log('🔊 正在诊断并播放测试语音...');
+    final diag = await _tts.diagnose();
+    if (!mounted) return;
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('TTS 诊断信息'),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: diag.entries
+                .map((e) => Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 3),
+                      child: Text(
+                        '${e.key}：${e.value}',
+                        style: const TextStyle(fontSize: 12),
+                      ),
+                    ))
+                .toList(),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('知道了'),
+          ),
+        ],
+      ),
+    );
+  }
+
   /// 开始听写
   void _start() async {
     if (widget.words.isEmpty) {
@@ -160,6 +209,11 @@ class _DictationScreenState extends State<DictationScreen> {
         '朗读 $_readCount 遍，词间间隔 $_intervalSeconds 秒'
         '${_readCount == 2 ? '，两遍间隔 $_repeatIntervalSeconds 秒' : ''}');
     _saveSettings();
+    // 启动前台服务：持有唤醒锁，锁屏/黑屏时仍能继续自动播报
+    await ForegroundService.start(
+      '正在听写',
+      '${widget.wordListName}：共 ${_shuffledWords.length} 个词语',
+    );
     _nextWord();
   }
 
@@ -175,6 +229,11 @@ class _DictationScreenState extends State<DictationScreen> {
 
     final word = _shuffledWords[_currentIndex];
     _log('▶ 第 ${_currentIndex + 1}/${_shuffledWords.length} 个词：$word');
+    // 更新常驻通知进度（不显示具体词，避免锁屏时泄题）
+    ForegroundService.update(
+      '正在听写（第 ${_currentIndex + 1}/${_shuffledWords.length} 个）',
+      '锁屏/黑屏时会继续自动播报',
+    );
     setState(() => _isSpeaking = true);
 
     try {
@@ -204,7 +263,7 @@ class _DictationScreenState extends State<DictationScreen> {
       _startCountdown();
     } else {
       // 手动模式：等待用户点击
-      _log('⏸ 等待点击「下一个词」');
+      _log('⏸ 等待点击「下一条」');
       setState(() {});
     }
   }
@@ -228,11 +287,11 @@ class _DictationScreenState extends State<DictationScreen> {
     });
   }
 
-  /// 手动下一个词
+  /// 手动下一个词（自动模式下可跳过当前词：取消倒计时立即下一条）
   void _manualNext() {
     if (_status != DictationStatus.running) return;
-    if (_mode != DictationMode.manual) return;
     _countdownTimer?.cancel();
+    setState(() => _isSpeaking = false);
     _nextWord();
   }
 
@@ -264,6 +323,7 @@ class _DictationScreenState extends State<DictationScreen> {
   void _stop() {
     _countdownTimer?.cancel();
     _tts.stop();
+    ForegroundService.stop();
     setState(() {
       _status = DictationStatus.idle;
       _currentIndex = -1;
@@ -276,6 +336,7 @@ class _DictationScreenState extends State<DictationScreen> {
   /// 完成
   void _finish() {
     _countdownTimer?.cancel();
+    ForegroundService.stop();
     setState(() {
       _status = DictationStatus.finished;
       _isSpeaking = false;
@@ -305,7 +366,11 @@ class _DictationScreenState extends State<DictationScreen> {
     if (_currentWord.isEmpty) return;
     _log('🔁 重播：$_currentWord');
     setState(() => _isSpeaking = true);
-    await _tts.speak(_currentWord, repeat: _readCount);
+    await _tts.speak(
+      _currentWord,
+      repeat: _readCount,
+      repeatIntervalSeconds: _repeatIntervalSeconds,
+    );
     if (mounted) setState(() => _isSpeaking = false);
   }
 
@@ -351,7 +416,7 @@ class _DictationScreenState extends State<DictationScreen> {
   Widget _buildConfigPanel() {
     final disabled = _status != DictationStatus.idle;
     return Padding(
-      padding: const EdgeInsets.all(12),
+      padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
       child: Column(
         children: [
           Row(
@@ -371,6 +436,20 @@ class _DictationScreenState extends State<DictationScreen> {
                 onSelected: disabled
                     ? null
                     : (v) => setState(() => _mode = DictationMode.manual),
+              ),
+              const SizedBox(width: 12),
+              // 测试按钮放在「手动」后面，任何时候都可点击测试
+              OutlinedButton.icon(
+                onPressed: _showDiagnosis,
+                icon: const Icon(Icons.volume_up, size: 16),
+                label: const Text('测试'),
+                style: OutlinedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 10, vertical: 4),
+                  minimumSize: const Size(0, 36),
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  textStyle: const TextStyle(fontSize: 13),
+                ),
               ),
             ],
           ),
@@ -395,7 +474,7 @@ class _DictationScreenState extends State<DictationScreen> {
                 SizedBox(
                   width: 60,
                   child: TextFormField(
-                    initialValue: '$_intervalSeconds',
+                    controller: _intervalCtrl,
                     keyboardType: TextInputType.number,
                     enabled: !disabled,
                     decoration: const InputDecoration(
@@ -414,23 +493,32 @@ class _DictationScreenState extends State<DictationScreen> {
               ],
             ],
           ),
-          // 朗读2遍时：两遍之间的间隔可调
+          // 朗读2遍时：两遍之间的间隔用数字输入框，可任意填写正整数秒
           if (_readCount == 2) ...[
             const SizedBox(height: 8),
             Row(
               children: [
                 const Text('两遍间隔：',
                     style: TextStyle(fontWeight: FontWeight.bold)),
-                for (final sec in [1, 2, 3]) ...[
-                  ChoiceChip(
-                    label: Text('$sec 秒'),
-                    selected: _repeatIntervalSeconds == sec,
-                    onSelected: disabled
-                        ? null
-                        : (v) => setState(() => _repeatIntervalSeconds = sec),
+                SizedBox(
+                  width: 60,
+                  child: TextFormField(
+                    controller: _repeatIntervalCtrl,
+                    keyboardType: TextInputType.number,
+                    enabled: !disabled,
+                    decoration: const InputDecoration(
+                      suffixText: '秒',
+                      isDense: true,
+                      contentPadding: EdgeInsets.symmetric(vertical: 8),
+                    ),
+                    onChanged: (v) {
+                      final n = int.tryParse(v);
+                      if (n != null && n > 0) {
+                        setState(() => _repeatIntervalSeconds = n);
+                      }
+                    },
                   ),
-                  const SizedBox(width: 8),
-                ],
+                ),
               ],
             ),
             if (_mode == DictationMode.auto)
@@ -450,38 +538,19 @@ class _DictationScreenState extends State<DictationScreen> {
           Row(
             children: [
               const Text('语速：', style: TextStyle(fontWeight: FontWeight.bold)),
-              ChoiceChip(
-                label: const Text('0.75'),
-                selected: _speed == 0.75,
-                onSelected: disabled
-                    ? null
-                    : (v) async {
-                        setState(() => _speed = 0.75);
-                        await _tts.setSpeed(0.75);
-                      },
-              ),
-              const SizedBox(width: 8),
-              ChoiceChip(
-                label: const Text('1.0'),
-                selected: _speed == 1.0,
-                onSelected: disabled
-                    ? null
-                    : (v) async {
-                        setState(() => _speed = 1.0);
-                        await _tts.setSpeed(1.0);
-                      },
-              ),
-              const SizedBox(width: 8),
-              ChoiceChip(
-                label: const Text('1.25'),
-                selected: _speed == 1.25,
-                onSelected: disabled
-                    ? null
-                    : (v) async {
-                        setState(() => _speed = 1.25);
-                        await _tts.setSpeed(1.25);
-                      },
-              ),
+              for (final rate in [0.5, 0.75, 1.0, 1.25]) ...[
+                ChoiceChip(
+                  label: Text(rate.toString()),
+                  selected: _speed == rate,
+                  onSelected: disabled
+                      ? null
+                      : (v) async {
+                          setState(() => _speed = rate);
+                          await _tts.setSpeed(rate);
+                        },
+                ),
+                const SizedBox(width: 8),
+              ],
             ],
           ),
           const SizedBox(height: 8),
@@ -502,53 +571,15 @@ class _DictationScreenState extends State<DictationScreen> {
               ),
             ],
           ),
-          // 测试语音按钮独占一行，避免被右边缘裁切
-          OutlinedButton.icon(
-            onPressed: () async {
-              _log('🔊 正在诊断并播放测试语音...');
-              final diag = await _tts.diagnose();
-              if (!mounted) return;
-              showDialog(
-                context: context,
-                builder: (ctx) => AlertDialog(
-                  title: const Text('TTS 诊断信息'),
-                  content: SingleChildScrollView(
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: diag.entries
-                          .map((e) => Padding(
-                                padding:
-                                    const EdgeInsets.symmetric(vertical: 3),
-                                child: Text(
-                                  '${e.key}：${e.value}',
-                                  style: const TextStyle(fontSize: 12),
-                                ),
-                              ))
-                          .toList(),
-                    ),
-                  ),
-                  actions: [
-                    TextButton(
-                      onPressed: () => Navigator.pop(ctx),
-                      child: const Text('知道了'),
-                    ),
-                  ],
-                ),
-              );
-            },
-            icon: const Icon(Icons.volume_up, size: 18),
-            label: const Text('测试语音'),
-          ),
         ],
       ),
     );
   }
 
-  /// 状态面板
+  /// 状态面板（紧凑布局，避免控制按钮被底部日志遮挡）
   Widget _buildStatusPanel() {
     return Container(
-      padding: const EdgeInsets.all(20),
+      padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
       color: Colors.grey.shade50,
       child: Column(
         children: [
@@ -557,31 +588,32 @@ class _DictationScreenState extends State<DictationScreen> {
             value: _shuffledWords.isEmpty
                 ? 0
                 : (_currentIndex + 1) / _shuffledWords.length,
-            minHeight: 8,
-            borderRadius: BorderRadius.circular(4),
+            minHeight: 5,
+            borderRadius: BorderRadius.circular(3),
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 6),
           Text(
             _status == DictationStatus.idle
                 ? '点击「开始」进行听写'
                 : _status == DictationStatus.finished
                     ? '听写完成 🎉'
                     : '进度：${_currentIndex + 1} / ${_shuffledWords.length}',
-            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w500),
+            style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 4),
           // 当前词提示（不显示具体词，避免作弊）
           if (_isSpeaking)
             const Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 SizedBox(
-                  width: 16,
-                  height: 16,
+                  width: 13,
+                  height: 13,
                   child: CircularProgressIndicator(strokeWidth: 2),
                 ),
-                SizedBox(width: 8),
-                Text('正在播报...', style: TextStyle(color: Colors.blue)),
+                SizedBox(width: 6),
+                Text('正在播报...',
+                    style: TextStyle(color: Colors.blue, fontSize: 13)),
               ],
             )
           else if (_mode == DictationMode.auto &&
@@ -589,13 +621,13 @@ class _DictationScreenState extends State<DictationScreen> {
               _status == DictationStatus.running)
             Text(
               '$_countdown 秒后播报下一个词',
-              style: const TextStyle(color: Colors.orange, fontSize: 15),
+              style: const TextStyle(color: Colors.orange, fontSize: 13),
             )
           else if (_mode == DictationMode.manual &&
               _status == DictationStatus.running)
             const Text(
-              '请点击「下一个词」继续',
-              style: TextStyle(color: Colors.orange, fontSize: 15),
+              '请点击「下一条」继续',
+              style: TextStyle(color: Colors.orange, fontSize: 13),
             ),
         ],
       ),
@@ -605,7 +637,7 @@ class _DictationScreenState extends State<DictationScreen> {
   /// 控制面板
   Widget _buildControlPanel() {
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
+      padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 8),
       child: Wrap(
         alignment: WrapAlignment.center,
         spacing: 10,
@@ -650,17 +682,6 @@ class _DictationScreenState extends State<DictationScreen> {
               label: const Text('停止'),
               style: OutlinedButton.styleFrom(foregroundColor: Colors.red),
             ),
-          if (_mode == DictationMode.manual &&
-              _status == DictationStatus.running)
-            ElevatedButton.icon(
-              onPressed: _manualNext,
-              icon: const Icon(Icons.skip_next),
-              label: const Text('下一个词'),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.blue,
-                foregroundColor: Colors.white,
-              ),
-            ),
           if (_status == DictationStatus.running ||
               _status == DictationStatus.paused) ...[
             OutlinedButton.icon(
@@ -668,6 +689,18 @@ class _DictationScreenState extends State<DictationScreen> {
               icon: const Icon(Icons.replay),
               label: const Text('重播'),
             ),
+            // 下一条：运行中（自动/手动模式）都显示，放在「重播」后面。
+            // 自动模式下点击会取消当前倒计时，立即跳到下一个词。
+            if (_status == DictationStatus.running)
+              ElevatedButton.icon(
+                onPressed: _manualNext,
+                icon: const Icon(Icons.skip_next),
+                label: const Text('下一条'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.blue,
+                  foregroundColor: Colors.white,
+                ),
+              ),
             OutlinedButton.icon(
               onPressed: _addToMistakeBook,
               icon: const Icon(Icons.bookmark_add),

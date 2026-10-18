@@ -16,6 +16,9 @@ dependencies:
   cupertino_icons: ^1.0.6
   audioplayers: ^6.1.0
   fast_gbk: ^1.0.0
+  # 前台服务 + 唤醒锁：锁屏/黑屏时保持 CPU 运行，TTS 能继续自动播报下一条
+  # 锁定 8.x 系列（compileSdk 34/Kotlin 1.7.10 即可），避免 9+ 对 Gradle/Kotlin 的高要求
+  flutter_foreground_task: ^8.17.0
 
 dev_dependencies:
   flutter_test:
