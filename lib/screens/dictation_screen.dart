@@ -54,6 +54,10 @@ class _DictationScreenState extends State<DictationScreen> {
   Timer? _countdownTimer;
   int _countdown = 0;
   bool _isSpeaking = false;
+  // 调度代次号：每次进入新的播报链(_nextWord/重播)都 ++，
+  // 被打断的旧链在 await 恢复后比对代次，不一致就直接退出，
+  // 绝不继续 setState 或启动倒计时，避免新旧链叠加导致节奏混乱。
+  int _gen = 0;
 
   String get _currentWord =>
       (_currentIndex >= 0 && _currentIndex < _shuffledWords.length)
@@ -199,7 +203,8 @@ class _DictationScreenState extends State<DictationScreen> {
 
   /// 播报下一个词语
   Future<void> _nextWord() async {
-    // 每次进入前，确保先取消上一个词遗留的定时器，防止定时器冲突
+    // 每次进入都是新的一代：让所有在途的旧链失效，并取消旧定时器
+    final gen = ++_gen;
     _countdownTimer?.cancel();
 
     if (_status != DictationStatus.running) return;
@@ -212,7 +217,7 @@ class _DictationScreenState extends State<DictationScreen> {
 
     final word = _shuffledWords[_currentIndex];
     _log('▶ 第 ${_currentIndex + 1}/${_shuffledWords.length} 个词：$word');
-    
+
     // 关键修复：在整个朗读过程（包含多遍及中间间隔）期间，UI 状态必须一直保持为“正在播报”
     setState(() {
       _isSpeaking = true;
@@ -222,11 +227,11 @@ class _DictationScreenState extends State<DictationScreen> {
     try {
       if (_beepEnabled) {
         await _tts.playBeep();
-        if (_status != DictationStatus.running) return;
+        if (gen != _gen || _status != DictationStatus.running) return;
         await Future.delayed(const Duration(seconds: 1));
-        if (_status != DictationStatus.running) return;
+        if (gen != _gen || _status != DictationStatus.running) return;
       }
-      
+
       // 等待 tts.speak 完整执行完毕（即所有遍数全部播完，且中间间隔也已走完）
       await _tts.speak(
         word,
@@ -236,6 +241,10 @@ class _DictationScreenState extends State<DictationScreen> {
     } catch (e) {
       _log('⚠ 播报出错：$e');
     }
+
+    // 已被更新的链取代（被点下一条/重播/暂停/停止）：旧链直接退出，
+    // 绝不继续 setState 或启动倒计时，避免新旧链叠加乱节奏。
+    if (gen != _gen) return;
 
     if (!mounted || _status != DictationStatus.running) return;
 
@@ -351,6 +360,7 @@ class _DictationScreenState extends State<DictationScreen> {
 
   Future<void> _replayCurrent() async {
     if (_currentWord.isEmpty) return;
+    final gen = ++_gen;
     _countdownTimer?.cancel();
     _log('🔁 重播：$_currentWord');
     setState(() => _isSpeaking = true);
@@ -359,8 +369,9 @@ class _DictationScreenState extends State<DictationScreen> {
       repeat: _readCount,
       repeatIntervalSeconds: _repeatIntervalSeconds,
     );
+    if (gen != _gen) return; // 重播期间又被切词/打断，旧链退出
     if (mounted) setState(() => _isSpeaking = false);
-    if (_mode == DictationMode.auto && _status == DictationStatus.running) {
+    if (gen == _gen && _mode == DictationMode.auto && _status == DictationStatus.running) {
       _startCountdown();
     }
   }
