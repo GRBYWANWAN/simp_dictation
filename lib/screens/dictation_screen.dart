@@ -31,24 +31,20 @@ class _DictationScreenState extends State<DictationScreen> {
   final TtsService _tts = TtsService();
   final ScrollController _logScroll = ScrollController();
   final List<String> _logs = [];
-  // 数字输入框控制器（保证异步加载设置后框内显示的是保存值）
   final TextEditingController _intervalCtrl =
       TextEditingController(text: '5');
   final TextEditingController _repeatIntervalCtrl =
-      TextEditingController(text: '1');
+      TextEditingController(text: '3');
 
   // 听写配置
   DictationMode _mode = DictationMode.auto;
-  int _readCount = 1;
+  int _readCount = 2; // 默认 2 遍
   int _intervalSeconds = 5; // 词与词之间的基础间隔（秒）
-  int _repeatIntervalSeconds = 1; // 朗读2遍时，两遍之间的间隔（秒）
+  int _repeatIntervalSeconds = 3; // 两遍之间的间隔默认 3 秒
   bool _shuffle = true;
-  double _speed = 1.0; // 语速：0.75 / 1.0 / 1.25
-  bool _beepEnabled = true; // 每个词前播放提示音
+  double _speed = 1.0;
+  bool _beepEnabled = true;
 
-  /// 自动模式下，最后一遍朗读播完后等待的秒数。
-  /// 注意：两遍之间的间隔 X 已在朗读过程中（第一遍→第二遍之间）消耗掉，
-  /// 这里只取基础词间间隔 Y，不再额外累加 X，否则第二遍播完会多等 X 秒。
   int get _totalInterval => _intervalSeconds;
 
   // 运行状态
@@ -75,7 +71,6 @@ class _DictationScreenState extends State<DictationScreen> {
   void dispose() {
     _countdownTimer?.cancel();
     _tts.dispose();
-    // 离开页面时确保释放唤醒锁
     WakeLockService.disable();
     _intervalCtrl.dispose();
     _repeatIntervalCtrl.dispose();
@@ -87,14 +82,13 @@ class _DictationScreenState extends State<DictationScreen> {
     await _tts.init();
   }
 
-  /// 加载保存的设置
   Future<void> _loadSettings() async {
     final s = await widget.storage.loadSettings();
     setState(() {
       _mode = s['mode'] == 'manual' ? DictationMode.manual : DictationMode.auto;
-      _readCount = (s['readCount'] as int?) ?? 1;
+      _readCount = (s['readCount'] as int?) ?? 2;
       _intervalSeconds = (s['interval'] as int?) ?? 5;
-      _repeatIntervalSeconds = (s['repeatInterval'] as int?) ?? 1;
+      _repeatIntervalSeconds = (s['repeatInterval'] as int?) ?? 3;
       _shuffle = (s['shuffle'] as bool?) ?? true;
       _speed = (s['speed'] as num?)?.toDouble() ?? 1.0;
       _beepEnabled = (s['beep'] as bool?) ?? true;
@@ -105,7 +99,6 @@ class _DictationScreenState extends State<DictationScreen> {
     _tts.setBeepEnabled(_beepEnabled);
   }
 
-  /// 保存设置
   Future<void> _saveSettings() async {
     await widget.storage.saveSettings({
       'mode': _mode == DictationMode.auto ? 'auto' : 'manual',
@@ -118,7 +111,6 @@ class _DictationScreenState extends State<DictationScreen> {
     });
   }
 
-  /// 添加日志
   void _log(String msg) {
     final time = DateTime.now();
     final stamp =
@@ -126,7 +118,6 @@ class _DictationScreenState extends State<DictationScreen> {
     setState(() {
       _logs.add('[$stamp] $msg');
     });
-    // 自动滚动到底部
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (_logScroll.hasClients) {
         _logScroll.animateTo(
@@ -138,7 +129,6 @@ class _DictationScreenState extends State<DictationScreen> {
     });
   }
 
-  /// 显示 Snackbar
   void _showSnack(String msg, {bool error = false}) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
@@ -149,7 +139,6 @@ class _DictationScreenState extends State<DictationScreen> {
     );
   }
 
-  /// 测试语音：诊断 TTS 并播放测试音，弹窗显示诊断信息
   Future<void> _showDiagnosis() async {
     _log('🔊 正在诊断并播放测试语音...');
     final diag = await _tts.diagnose();
@@ -183,17 +172,15 @@ class _DictationScreenState extends State<DictationScreen> {
     );
   }
 
-  /// 开始听写
   void _start() async {
     if (widget.words.isEmpty) {
       _showSnack('没有词语', error: true);
       return;
     }
 
-    // 初始化 TTS
+    _countdownTimer?.cancel();
     await _tts.init();
 
-    // 准备词语列表
     _shuffledWords = List.from(widget.words);
     if (_shuffle) {
       _shuffledWords.shuffle();
@@ -206,13 +193,15 @@ class _DictationScreenState extends State<DictationScreen> {
         '朗读 $_readCount 遍，词间间隔 $_intervalSeconds 秒'
         '${_readCount == 2 ? '，两遍间隔 $_repeatIntervalSeconds 秒' : ''}');
     _saveSettings();
-    // 持有 PARTIAL_WAKE_LOCK：屏幕可关，但 CPU 不休眠，黑屏后倒计时照常走、TTS 自动播下一个词
     await WakeLockService.enable();
     _nextWord();
   }
 
   /// 播报下一个词语
   Future<void> _nextWord() async {
+    // 每次进入前，确保先取消上一个词遗留的定时器，防止定时器冲突
+    _countdownTimer?.cancel();
+
     if (_status != DictationStatus.running) return;
 
     _currentIndex++;
@@ -223,16 +212,22 @@ class _DictationScreenState extends State<DictationScreen> {
 
     final word = _shuffledWords[_currentIndex];
     _log('▶ 第 ${_currentIndex + 1}/${_shuffledWords.length} 个词：$word');
-    setState(() => _isSpeaking = true);
+    
+    // 关键修复：在整个朗读过程（包含多遍及中间间隔）期间，UI 状态必须一直保持为“正在播报”
+    setState(() {
+      _isSpeaking = true;
+      _countdown = 0;
+    });
 
     try {
-      // 每个词语前先播放"叮咚"提示音，间隔 1 秒后再播报词语
       if (_beepEnabled) {
         await _tts.playBeep();
         if (_status != DictationStatus.running) return;
         await Future.delayed(const Duration(seconds: 1));
         if (_status != DictationStatus.running) return;
       }
+      
+      // 等待 tts.speak 完整执行完毕（即所有遍数全部播完，且中间间隔也已走完）
       await _tts.speak(
         word,
         repeat: _readCount,
@@ -242,27 +237,25 @@ class _DictationScreenState extends State<DictationScreen> {
       _log('⚠ 播报出错：$e');
     }
 
-    if (!mounted) return;
+    if (!mounted || _status != DictationStatus.running) return;
+
+    // 整个词的所有遍数彻底播完后，才结束“正在播报”状态
     setState(() => _isSpeaking = false);
 
-    if (_status != DictationStatus.running) return;
-
     if (_mode == DictationMode.auto) {
-      // 自动模式：倒计时后自动下一个
+      // 只有在全部播完后，才开始跑真正的词间间隔 Y 秒倒计时
       _startCountdown();
     } else {
-      // 手动模式：等待用户点击
       _log('⏸ 等待点击「下一条」');
       setState(() {});
     }
   }
 
-  /// 开始倒计时
   void _startCountdown() {
     _countdown = _totalInterval;
     _countdownTimer?.cancel();
     _countdownTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
-      if (!mounted) {
+      if (!mounted || _status != DictationStatus.running) {
         timer.cancel();
         return;
       }
@@ -276,18 +269,26 @@ class _DictationScreenState extends State<DictationScreen> {
     });
   }
 
-  /// 手动下一个词（自动模式下可跳过当前词：取消倒计时立即下一条）
+  /// 手动下一条（核心修复：无论当前在朗读第1遍、两遍间隔中、还是在倒计时，点击立刻强行切到下一个词）
   void _manualNext() {
     if (_status != DictationStatus.running) return;
+    
+    // 1. 立即杀掉倒计时
     _countdownTimer?.cancel();
-    // 立即打断当前播报：令牌让旧的播报循环（含两遍间隔中等待的第二遍）作废，
-    // 避免切到 B 后，A 的第二遍间隔一到又被播出来。
+    
+    // 2. 强行终止当前 TTS 正在进行的播报与内部等待
     _tts.stop();
-    setState(() => _isSpeaking = false);
+    
+    // 3. 强制重置状态并立刻进入下一个词
+    setState(() {
+      _isSpeaking = false;
+      _countdown = 0;
+    });
+    
+    _log('⏭ 手动跳过，进入下一条');
     _nextWord();
   }
 
-  /// 暂停
   void _pause() {
     if (_status != DictationStatus.running) return;
     _countdownTimer?.cancel();
@@ -299,19 +300,16 @@ class _DictationScreenState extends State<DictationScreen> {
     _log('⏸ 已暂停');
   }
 
-  /// 继续
   void _resume() {
     if (_status != DictationStatus.paused) return;
     setState(() => _status = DictationStatus.running);
     _log('▶ 继续听写');
     if (_mode == DictationMode.auto) {
-      // 继续时重新播报当前词
       _currentIndex--;
       _nextWord();
     }
   }
 
-  /// 停止
   void _stop() {
     _countdownTimer?.cancel();
     _tts.stop();
@@ -325,7 +323,6 @@ class _DictationScreenState extends State<DictationScreen> {
     _log('⏹ 已停止听写');
   }
 
-  /// 完成
   void _finish() {
     _countdownTimer?.cancel();
     WakeLockService.disable();
@@ -337,7 +334,6 @@ class _DictationScreenState extends State<DictationScreen> {
     _showSnack('听写完成！');
   }
 
-  /// 加入错题本
   Future<void> _addToMistakeBook() async {
     if (_currentWord.isEmpty) {
       _showSnack('当前没有词语', error: true);
@@ -353,9 +349,9 @@ class _DictationScreenState extends State<DictationScreen> {
     }
   }
 
-  /// 重新播报当前词
   Future<void> _replayCurrent() async {
     if (_currentWord.isEmpty) return;
+    _countdownTimer?.cancel();
     _log('🔁 重播：$_currentWord');
     setState(() => _isSpeaking = true);
     await _tts.speak(
@@ -364,6 +360,9 @@ class _DictationScreenState extends State<DictationScreen> {
       repeatIntervalSeconds: _repeatIntervalSeconds,
     );
     if (mounted) setState(() => _isSpeaking = false);
+    if (_mode == DictationMode.auto && _status == DictationStatus.running) {
+      _startCountdown();
+    }
   }
 
   @override
@@ -376,24 +375,19 @@ class _DictationScreenState extends State<DictationScreen> {
       body: SafeArea(
         child: Column(
           children: [
-            // 上方内容：超高时可滚动，避免被裁切
             Expanded(
               child: SingleChildScrollView(
                 child: Column(
                   children: [
-                    // 配置区（仅空闲时可改）
                     _buildConfigPanel(),
                     const Divider(height: 1),
-                    // 状态显示区
                     _buildStatusPanel(),
                     const Divider(height: 1),
-                    // 控制按钮区
                     _buildControlPanel(),
                   ],
                 ),
               ),
             ),
-            // 日志区：固定高度，始终贴底
             SizedBox(
               height: 150,
               child: _buildLogPanel(),
@@ -404,7 +398,6 @@ class _DictationScreenState extends State<DictationScreen> {
     );
   }
 
-  /// 配置面板
   Widget _buildConfigPanel() {
     final disabled = _status != DictationStatus.idle;
     return Padding(
@@ -430,7 +423,6 @@ class _DictationScreenState extends State<DictationScreen> {
                     : (v) => setState(() => _mode = DictationMode.manual),
               ),
               const SizedBox(width: 12),
-              // 测试按钮放在「手动」后面，任何时候都可点击测试
               OutlinedButton.icon(
                 onPressed: _showDiagnosis,
                 icon: const Icon(Icons.volume_up, size: 16),
@@ -485,7 +477,6 @@ class _DictationScreenState extends State<DictationScreen> {
               ],
             ],
           ),
-          // 朗读2遍时：两遍之间的间隔用数字输入框，可任意填写正整数秒
           if (_readCount == 2) ...[
             const SizedBox(height: 8),
             Row(
@@ -567,14 +558,12 @@ class _DictationScreenState extends State<DictationScreen> {
     );
   }
 
-  /// 状态面板（紧凑布局，避免控制按钮被底部日志遮挡）
   Widget _buildStatusPanel() {
     return Container(
       padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
       color: Colors.grey.shade50,
       child: Column(
         children: [
-          // 进度
           LinearProgressIndicator(
             value: _shuffledWords.isEmpty
                 ? 0
@@ -592,7 +581,6 @@ class _DictationScreenState extends State<DictationScreen> {
             style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
           ),
           const SizedBox(height: 4),
-          // 当前词提示（不显示具体词，避免作弊）
           if (_isSpeaking)
             const Row(
               mainAxisAlignment: MainAxisAlignment.center,
@@ -625,7 +613,6 @@ class _DictationScreenState extends State<DictationScreen> {
     );
   }
 
-  /// 控制面板
   Widget _buildControlPanel() {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 8),
@@ -680,8 +667,6 @@ class _DictationScreenState extends State<DictationScreen> {
               icon: const Icon(Icons.replay),
               label: const Text('重播'),
             ),
-            // 下一条：运行中（自动/手动模式）都显示，放在「重播」后面。
-            // 自动模式下点击会取消当前倒计时，立即跳到下一个词。
             if (_status == DictationStatus.running)
               ElevatedButton.icon(
                 onPressed: _manualNext,
@@ -704,7 +689,6 @@ class _DictationScreenState extends State<DictationScreen> {
     );
   }
 
-  /// 日志面板
   Widget _buildLogPanel() {
     return Container(
       width: double.infinity,
