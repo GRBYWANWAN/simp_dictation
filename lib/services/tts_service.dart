@@ -169,7 +169,7 @@ class TtsService {
     } catch (_) {}
   }
 
-  /// 朗读文字
+/// 朗读文字
   Future<void> speak(String text, {
     int repeat = 1,
     int timeout = 8,
@@ -194,6 +194,8 @@ class TtsService {
           },
         );
       } catch (_) {}
+      
+      // 核心修改：只有“不是最后一遍”时，才等待两遍之间的间隔 X 秒
       if (i < repeat - 1) {
         await Future.delayed(Duration(seconds: repeatIntervalSeconds));
         if (_speakToken != myToken) return; // 两遍间隔期间被切词，不再播第二遍
