@@ -52,22 +52,12 @@ class FileService {
       final bytes = _encodeString(content);
 
       if (Platform.isAndroid) {
-        // 优先直接写入系统 Download 目录：导出后用户在 Download 文件夹即可直接找到，
-        // 不必再翻目录。若因 Android 分区存储限制写入失败，再回退到系统保存对话框。
-        try {
-          final dir = await getDownloadsDirectory();
-          if (dir != null) {
-            final ts = DateTime.now().millisecondsSinceEpoch;
-            final path = '${dir.path}/${fileName}_$ts.txt';
-            await File(path).writeAsBytes(bytes);
-            return path;
-          }
-        } catch (_) {
-          // 直接写 Download 被系统拒绝，回退到 SAF 选择器
-        }
-        // 回退：由系统 SAF 写入（提示用户选 Download）
+        // Android 11+ 分区存储下，getDownloadsDirectory() 返回的是 app 私有目录
+        // /storage/emulated/0/Android/data/<pkg>/files/Download，不是系统公共 Download。
+        // 因此直接走系统 SAF 保存对话框，由用户选择/确认 Download 文件夹，
+        // 写出的文件落在系统公共 /storage/emulated/0/Download。
         final outputPath = await FilePicker.platform.saveFile(
-          dialogTitle: '导出词单为 TXT（请选 Download 文件夹）',
+          dialogTitle: '导出词单为 TXT（请选择 Download 文件夹）',
           fileName: '$fileName.txt',
           type: FileType.custom,
           allowedExtensions: ['txt'],

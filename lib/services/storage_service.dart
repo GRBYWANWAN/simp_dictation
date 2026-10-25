@@ -20,16 +20,20 @@ class StorageService {
     }
   }
 
-  SharedPreferences get _p {
-    if (_prefs == null) {
-      throw Exception('StorageService 未初始化，请先调用 init()');
-    }
+  /// 确保 SharedPreferences 就绪。
+  /// 启动时若因 platform channel 卡顿被 8 秒超时兜底，_prefs 会是 null；
+  /// 此后任何读写都自动重试一次（5 秒超时），而不是直接抛异常导致"点了没反应/永久转圈"。
+  Future<SharedPreferences> _ensurePrefs() async {
+    if (_prefs != null) return _prefs!;
+    _prefs = await SharedPreferences.getInstance()
+        .timeout(const Duration(seconds: 5));
     return _prefs!;
   }
 
   /// 加载所有词单
   Future<List<WordList>> loadWordLists() async {
-    final raw = _p.getString(_keyWordLists);
+    final p = await _ensurePrefs();
+    final raw = p.getString(_keyWordLists);
     if (raw == null || raw.isEmpty) return [];
     try {
       final List<dynamic> decoded = jsonDecode(raw);
@@ -41,8 +45,9 @@ class StorageService {
 
   /// 保存所有词单
   Future<void> saveWordLists(List<WordList> lists) async {
+    final p = await _ensurePrefs();
     final encoded = jsonEncode(lists.map((e) => e.toJson()).toList());
-    await _p.setString(_keyWordLists, encoded);
+    await p.setString(_keyWordLists, encoded);
   }
 
   /// 新增或更新词单
@@ -99,12 +104,14 @@ class StorageService {
 
   /// 保存听写设置
   Future<void> saveSettings(Map<String, dynamic> settings) async {
-    await _p.setString(_keySettings, jsonEncode(settings));
+    final p = await _ensurePrefs();
+    await p.setString(_keySettings, jsonEncode(settings));
   }
 
   /// 加载听写设置
   Future<Map<String, dynamic>> loadSettings() async {
-    final raw = _p.getString(_keySettings);
+    final p = await _ensurePrefs();
+    final raw = p.getString(_keySettings);
     if (raw == null || raw.isEmpty) {
       return {
         'mode': 'auto', // auto / manual
