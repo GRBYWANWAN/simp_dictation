@@ -129,8 +129,13 @@ class _HomeScreenState extends State<HomeScreen> {
     if (existing != null && existing.name == name) {
       // 更新已有词单
       final updated = existing.copyWith(words: words);
-      await widget.storage.upsertWordList(updated);
-      _showSnack('词单「$name」已更新（${words.length} 个词语）');
+      try {
+        await widget.storage.upsertWordList(updated);
+        _showSnack('词单「$name」已更新（${words.length} 个词语）');
+      } catch (e) {
+        _showSnack('保存失败：$e', error: true);
+        return;
+      }
     } else {
       // 检查名称是否重复
       final dup = _wordLists.any((l) => l.name == name && l.id != _selectedListId);
@@ -144,7 +149,12 @@ class _HomeScreenState extends State<HomeScreen> {
         name: name,
         words: words,
       );
-      await widget.storage.upsertWordList(newList);
+      try {
+        await widget.storage.upsertWordList(newList);
+      } catch (e) {
+        _showSnack('保存失败：$e', error: true);
+        return;
+      }
       _selectedListId = newList.id;
       _showSnack('词单「$name」已保存（${words.length} 个词语）');
     }

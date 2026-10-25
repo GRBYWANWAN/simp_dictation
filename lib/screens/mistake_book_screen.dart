@@ -25,12 +25,23 @@ class _MistakeBookScreenState extends State<MistakeBookScreen> {
 
   Future<void> _loadMistakeBook() async {
     setState(() => _loading = true);
-    final book = await widget.storage.getMistakeBook();
-    setState(() {
-      _mistakeBook = book;
-      _selectedIndices.clear();
-      _loading = false;
-    });
+    try {
+      final book = await widget.storage.getMistakeBook();
+      if (!mounted) return;
+      setState(() {
+        _mistakeBook = book;
+        _selectedIndices.clear();
+        _loading = false;
+      });
+    } catch (e) {
+      // 存储暂不可用（启动超时等）时不能永久转圈，降级为空错题本
+      if (!mounted) return;
+      setState(() {
+        _mistakeBook = WordList.mistakeBook();
+        _selectedIndices.clear();
+        _loading = false;
+      });
+    }
   }
 
   void _showSnack(String msg, {bool error = false}) {
