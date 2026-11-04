@@ -104,29 +104,18 @@ jobs:
           mv android/build.gradle.kts.tmp android/build.gradle.kts
 
           # 注入正式 release 签名配置（从环境变量读 keystore）
-          python3 - <<'PY'
-          p = "android/app/build.gradle.kts"
-          s = open(p, encoding="utf-8").read()
-          signing_block = '''    signingConfigs {
-        create("release") {
-            storeFile = file(System.getenv("KEYSTORE_FILE") ?: "debug.keystore")
-            storePassword = System.getenv("KEYSTORE_PASSWORD") ?: "android"
-            keyAlias = System.getenv("KEY_ALIAS") ?: "androiddebugkey"
-            keyPassword = System.getenv("KEY_PASSWORD") ?: "android"
-        }
-    }
-
-'''
-          if 'signingConfigs' not in s:
-              s = s.replace("    buildTypes {", signing_block + "    buildTypes {", 1)
-          s = s.replace(
-              'signingConfig = signingConfigs.getByName("debug")',
-              'signingConfig = signingConfigs.getByName("release")'
-          )
-          open(p, "w", encoding="utf-8").write(s)
-          print("=== build.gradle.kts after signing inject ===")
-          print(open(p, encoding="utf-8").read())
-          PY
+          echo '    signingConfigs {' > /tmp/signing.gradle
+          echo '        create("release") {' >> /tmp/signing.gradle
+          echo '            storeFile = file(System.getenv("KEYSTORE_FILE") ?: "debug.keystore")' >> /tmp/signing.gradle
+          echo '            storePassword = System.getenv("KEYSTORE_PASSWORD") ?: "android"' >> /tmp/signing.gradle
+          echo '            keyAlias = System.getenv("KEY_ALIAS") ?: "androiddebugkey"' >> /tmp/signing.gradle
+          echo '            keyPassword = System.getenv("KEY_PASSWORD") ?: "android"' >> /tmp/signing.gradle
+          echo '        }' >> /tmp/signing.gradle
+          echo '    }' >> /tmp/signing.gradle
+          awk '/^    buildTypes {/ && !done { while ((getline line < "/tmp/signing.gradle") > 0) print line; close("/tmp/signing.gradle"); done=1 } { print }' android/app/build.gradle.kts > /tmp/app.gradle && mv /tmp/app.gradle android/app/build.gradle.kts
+          sed -i 's/signingConfig = signingConfigs.getByName("debug")/signingConfig = signingConfigs.getByName("release")/' android/app/build.gradle.kts
+          echo "=== build.gradle.kts after signing inject ==="
+          cat android/app/build.gradle.kts
 
       - name: Prepare keystore
         env:
