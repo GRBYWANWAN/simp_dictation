@@ -102,18 +102,82 @@ jobs:
           printf 'subprojects {\n    afterEvaluate {\n        val a = extensions.findByName("android")\n        if (a is com.android.build.gradle.LibraryExtension) {\n            a.compileSdk = 36\n        }\n    }\n}\n' > android/build.gradle.kts.tmp
           cat android/build.gradle.kts >> android/build.gradle.kts.tmp
           mv android/build.gradle.kts.tmp android/build.gradle.kts
-          echo "=== app build.gradle.kts ==="
-          grep -n 'minSdk\|compileSdk' android/app/build.gradle.kts
+
+          # 注入正式 release 签名配置（从环境变量读 keystore）
+          python3 - <<'PY'
+          p = "android/app/build.gradle.kts"
+          s = open(p, encoding="utf-8").read()
+          signing_block = '''    signingConfigs {
+        create("release") {
+            storeFile = file(System.getenv("KEYSTORE_FILE") ?: "debug.keystore")
+            storePassword = System.getenv("KEYSTORE_PASSWORD") ?: "android"
+            keyAlias = System.getenv("KEY_ALIAS") ?: "androiddebugkey"
+            keyPassword = System.getenv("KEY_PASSWORD") ?: "android"
+        }
+    }
+
+'''
+          if 'signingConfigs' not in s:
+              s = s.replace("    buildTypes {", signing_block + "    buildTypes {", 1)
+          s = s.replace(
+              'signingConfig = signingConfigs.getByName("debug")',
+              'signingConfig = signingConfigs.getByName("release")'
+          )
+          open(p, "w", encoding="utf-8").write(s)
+          print("=== build.gradle.kts after signing inject ===")
+          print(open(p, encoding="utf-8").read())
+          PY
+
+      - name: Prepare keystore
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+        run: |
+          if [ -n "$KEYSTORE_BASE64" ]; then
+            echo "$KEYSTORE_BASE64" | base64 -d > /tmp/release.jks
+            echo "=== Using keystore from GitHub Secret KEYSTORE_BASE64 ==="
+          else
+            echo "=== KEYSTORE_BASE64 not set, generating one-time keystore (固定密码见下) ==="
+            keytool -genkeypair -v \
+              -keystore /tmp/release.jks \
+              -storepass dictation2026 \
+              -keypass dictation2026 \
+              -alias simple_dictation \
+              -keyalg RSA -keysize 2048 \
+              -validity 36500 \
+              -dname "CN=SimpleDictation, OU=Personal, O=Personal, L=Changzhou, ST=Jiangsu, C=CN"
+            echo ""
+            echo "================================================================"
+            echo "COPY BELOW (整段一行 base64) 存到 GitHub Secret KEYSTORE_BASE64"
+            echo "================================================================"
+            base64 -w0 /tmp/release.jks
+            echo ""
+            echo "================================================================"
+            echo "Secret 名称: KEYSTORE_BASE64"
+            echo "Store/Key 密码: dictation2026"
+            echo "Alias: simple_dictation"
+            echo "================================================================"
+          fi
+          echo "KEYSTORE_FILE=/tmp/release.jks" >> $GITHUB_ENV
+          echo "KEYSTORE_PASSWORD=dictation2026" >> $GITHUB_ENV
+          echo "KEY_ALIAS=simple_dictation" >> $GITHUB_ENV
+          echo "KEY_PASSWORD=dictation2026" >> $GITHUB_ENV
 
       - name: Analyze
         run: flutter analyze --no-fatal-infos --no-fatal-warnings || true
 
       - name: Build APK
-        run: flutter build apk --release --no-tree-shake-icons
+        run: |
+          flutter build apk --release --no-tree-shake-icons
+          # 重命名 APK 为 simp_dict_北京时间(UTC+8)时间戳.apk，精确到秒
+          TS=$(TZ=Asia/Shanghai date +%Y%m%d_%H%M%S)
+          mv build/app/outputs/flutter-apk/app-release.apk \
+             build/app/outputs/flutter-apk/simp_dict_${TS}.apk
+          echo "APK_NAME=simp_dict_${TS}.apk" >> $GITHUB_ENV
+          ls -lh build/app/outputs/flutter-apk/
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: simple-dictation-apk
-          path: build/app/outputs/flutter-apk/*.apk
+          name: simp_dict_${{ env.APK_NAME }}
+          path: build/app/outputs/flutter-apk/simp_dict_*.apk
           retention-days: 30
