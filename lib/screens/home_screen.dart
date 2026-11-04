@@ -239,19 +239,26 @@ class _HomeScreenState extends State<HomeScreen> {
   /// 导入 TXT
   Future<void> _importTxt() async {
     try {
-      final content = await widget.fileService.importTxt();
-      if (content == null) {
+      final result = await widget.fileService.importTxt();
+      if (result == null) {
         _showSnack('已取消导入');
         return;
       }
-      final words = widget.fileService.parseWords(content);
+      final words = widget.fileService.parseWords(result.content);
       if (words.isEmpty) {
         _showSnack('文件中没有找到有效词语', error: true);
         return;
       }
+      // 词单名称自动填为 TXT 文件名（去掉 .txt 后缀）
+      var displayName = result.fileName;
+      final lower = displayName.toLowerCase();
+      if (lower.endsWith('.txt')) {
+        displayName = displayName.substring(0, displayName.length - 4);
+      }
       setState(() {
         _cachedWords = words;
         _wordsController.text = words.join('\n');
+        _nameController.text = displayName;
       });
       _showSnack('已导入 ${words.length} 个词语');
     } catch (e) {
