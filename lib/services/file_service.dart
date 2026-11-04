@@ -10,8 +10,8 @@ class FileService {
   // GBK 解码器（容忍个别非法字节，不抛异常）
   static final GbkCodec _gbk = GbkCodec(allowMalformed: true);
   /// 从设备选择 TXT 文件并读取内容
-  /// 返回文件内容字符串，用户取消时返回 null
-  Future<String?> importTxt() async {
+  /// 返回 (文件内容, 文件名含扩展名)，用户取消时返回 null
+  Future<({String content, String fileName})?> importTxt() async {
     try {
       // 尽量让文件选择器初始定位到系统 Download 目录
       String? initialDir;
@@ -29,14 +29,17 @@ class FileService {
       if (result == null || result.files.isEmpty) return null;
 
       final file = result.files.first;
+      String content;
       // 优先用 bytes 读取，兼容各平台
       if (file.bytes != null) {
-        return _decodeBytes(file.bytes!);
+        content = _decodeBytes(file.bytes!);
       } else if (file.path != null) {
-        final content = await File(file.path!).readAsBytes();
-        return _decodeBytes(content);
+        final raw = await File(file.path!).readAsBytes();
+        content = _decodeBytes(raw);
+      } else {
+        return null;
       }
-      return null;
+      return (content: content, fileName: file.name);
     } catch (e) {
       throw Exception('导入 TXT 失败: $e');
     }
